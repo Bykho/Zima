@@ -1,0 +1,109 @@
+sim:
+  urdf: assets/SO-ARM100/Simulation/SO101/so101_new_calib.urdf
+  use_gui: true
+  timestep: 0.004166666666666667
+  gravity: -9.81
+  arm_base_position: [0.0, 0.0, 0.0]
+  motor_force: 200.0
+  board:
+    origin: [0.22, -0.10, 0.0]
+    square_size: 0.0375
+    surface_z: 0.02
+    yaw: 0.0
+    # ee_link: hover IK target (see board.py module doc)
+    ee_link: gripper_frame_link
+    ee_rpy: [3.14159, 0.0, 0.0]
+    show_grid: true
+    show_checker: true
+    show_pieces: true
+    start_fen: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR
+    pick_hover: 0.09
+    gripper_travel_z: 0.132
+  grasp:
+    # ik_link: jaw contact point for descend/carry (see board.py module doc)
+    ik_link: gripper_link
+    descend_steps: 14
+    travel_steps: 10
+    travel_tolerance: 0.14
+    min_contact_points: 1
+    min_normal_force: 0.05
+    close_steps: 100
+    settle_steps: 40
+    gripper_force: 150.0
+    friction: 1.5
+    timeout_s: 4.0
+  camera:
+    # 32×32 mm wrist mount on wrist-roll housing (gripper_link frame)
+    mount_link: gripper_link
+    aim_link: gripper_frame_link
+    eye_xyz: [0.03, 0.05, -0.02]
+    # gripper_frame +X/+Y toward workspace (not -Z back into the arm)
+    target_xyz: [0.16, 0.13, 0.02]
+    up_link: gripper_link
+    up_local: [0.0, 1.0, 0.0]
+    look_at: offset  # or board_plane to aim at square under jaws
+    width: 320
+    height: 240
+    fov: 75
+    preview_hz: 12
+
+joints:
+  - shoulder_pan
+  - shoulder_lift
+  - elbow_flex
+  - wrist_flex
+  - wrist_roll
+  - gripper
+
+poses:
+  home:
+    shoulder_pan: 0.0
+    shoulder_lift: 0.0
+    elbow_flex: 0.0
+    wrist_flex: 0.0
+    wrist_roll: 0.0
+    gripper: 0.8
+  reach:
+    shoulder_pan: 0.6
+    shoulder_lift: -0.9
+    elbow_flex: 1.2
+    wrist_flex: -0.3
+    wrist_roll: 0.0
+    gripper: 0.8
+  gripper_closed:
+    gripper: 0.0
+  above_board:
+    shoulder_pan: 0.35
+    shoulder_lift: -0.55
+    elbow_flex: 0.85
+    wrist_flex: -0.35
+    wrist_roll: 0.0
+    gripper: 0.8
+
+real:
+  port: null
+  robot_id: follower_arm
+  goal_velocity: 120
+  joints:
+    - shoulder_pan
+    - shoulder_lift
+    - elbow_flex
+    - wrist_flex
+    - wrist_roll
+    - gripper
+
+sync:
+  nudge_rad: 0.2
+  rate_hz: 30
+  joints:
+    - shoulder_pan
+    - shoulder_lift
+    - elbow_flex
+    - wrist_flex
+    - wrist_roll
+
+safety:
+  max_delta_ticks: 12
+  max_tracking_error: 120
+  max_load: 850
+  fault_streak: 6
