@@ -1,0 +1,166 @@
+PIECES TESTED: pawn, rook, bishop, knight, queen, king
+SOURCE SQUARES: d1, c2, d4, c4, e4, a4, a6, d6, f6, h4, h6
+DESTINATION SQUARES: d1, c2, d4, c4, e4, a4, a6, d6, f6, h4, h6
+TOTAL EPISODES: 133 (empty GT 66, empty vision 36, dest-reach 10, populated 21)
+
+PICKUP SUCCESS RATE:     104/133 (78%)
+TRANSPORT SUCCESS RATE:  102/133 (77%)
+PLACEMENT SUCCESS RATE:  65/133 (49%)
+FULL EPISODE SUCCESS RATE: 65/133 (49%)
+
+FAILURES BY CATEGORY:
+  SUCCESS: 65
+  PLACEMENT_FAIL: 37
+  PICKUP_FAIL: 29
+  TRANSPORT_FAIL: 2
+
+WORKSPACE / IK FAILURES:
+  pawn_h4_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  pawn_h6_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  rook_h4_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  rook_h6_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  bishop_h4_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  bishop_h6_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  knight_h4_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  knight_h6_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  queen_h4_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  queen_h6_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  king_h4_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  king_h6_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  queen_d1_h4_gt phase=fail_transport reason=IK_FAILURE
+  queen_d1_h6_gt phase=fail_transport reason=IK_FAILURE
+  pawn_h4_d4_vision phase=fail_observe reason=IK_NO_SOLUTION
+  rook_h4_d4_vision phase=fail_observe reason=IK_NO_SOLUTION
+  bishop_h4_d4_vision phase=fail_observe reason=IK_NO_SOLUTION
+  knight_h4_d4_vision phase=fail_observe reason=IK_NO_SOLUTION
+  queen_h4_d4_vision phase=fail_observe reason=IK_NO_SOLUTION
+  king_h4_d4_vision phase=fail_observe reason=IK_NO_SOLUTION
+  pop_rook_h1_d4_gt phase=fail_observe reason=IK_NO_SOLUTION
+  pop_pawn_h2_h4_gt phase=fail_observe reason=IK_NO_SOLUTION
+
+GRASP FAILURES: 9
+  pawn_a4_d4_vision GRASP_MISS
+  pop_rook_a1_d4_gt APPROACH_COLLISION
+  pop_knight_b1_d4_gt APPROACH_COLLISION
+  pop_king_e1_d4_gt APPROACH_COLLISION
+  pop_bishop_f1_d4_gt APPROACH_TRACK_FAIL
+  pop_knight_g1_d4_gt APPROACH_TRACK_FAIL
+  pop_pawn_f2_f4_gt APPROACH_TRACK_FAIL
+  pop_rook_a1_d4_vision APPROACH_COLLISION
+  pop_king_e1_d4_vision APPROACH_COLLISION
+
+NEIGHBOR COLLISIONS: 14
+  pop_bishop_c1_d4_gt phase=003_pregrasp
+  pop_queen_d1_d4_gt phase=003_pregrasp
+  pop_bishop_f1_d4_gt phase=003_pregrasp
+  pop_knight_g1_d4_gt phase=003_pregrasp
+  pop_pawn_a2_a4_gt phase=003_pregrasp
+  pop_pawn_c2_c4_gt phase=003_pregrasp
+  pop_pawn_d2_d4_gt phase=003_pregrasp
+  pop_pawn_e2_e4_gt phase=006_lift
+  pop_pawn_f2_f4_gt phase=003_pregrasp
+  pop_bishop_c1_d4_vision phase=003_pregrasp
+  pop_queen_d1_d4_vision phase=003_pregrasp
+  pop_pawn_c2_c4_vision phase=003_pregrasp
+
+PLACEMENT FAILURES: 37
+  rook_d1_d4_gt PLACEMENT_POSITION_ERROR
+  rook_c2_d4_gt RELEASE_FAILURE
+  rook_d4_e4_gt RELEASE_FAILURE
+  rook_c4_d4_gt PLACEMENT_POSITION_ERROR
+  rook_e4_d4_gt PLACEMENT_POSITION_ERROR
+  rook_d6_d4_gt PLACEMENT_POSITION_ERROR
+  rook_f6_d4_gt PLACEMENT_POSITION_ERROR
+  knight_d4_e4_gt PLACEMENT_POSITION_ERROR
+  knight_e4_d4_gt PLACEMENT_POSITION_ERROR
+  queen_c2_d4_gt PLACEMENT_POSITION_ERROR
+  queen_d4_e4_gt PLACEMENT_POSITION_ERROR
+  queen_c4_d4_gt RELEASE_FAILURE
+
+RETREAT FAILURES: 0
+
+PIECE × SQUARE PICKUP MATRIX (empty GT):
+              d1      c2      d4      c4      e4      a4      a6      d6      f6      h4      h6
+pawn           P       P       P       P       P       P       P       P       P       F       F
+rook           P       P       P       P       P       P       P       P       P       F       F
+bishop         P       P       P       P       P       P       P       P       P       F       F
+knight         P       P       P       P       P       P       P       P       P       F       F
+queen          P       P       P       P       P       P       P       P       P       F       F
+king           P       P       P       P       P       P       P       P       P       F       F
+
+PIECE × SQUARE TRANSPORT MATRIX (empty GT):
+              d1      c2      d4      c4      e4      a4      a6      d6      f6      h4      h6
+pawn           P       P       P       P       P       P       P       P       P       F       F
+rook           P       P       P       P       P       P       P       P       P       F       F
+bishop         P       P       P       P       P       P       P       P       P       F       F
+knight         P       P       P       P       P       P       P       P       P       F       F
+queen          P       P       P       P       P       P       P       P       P       F       F
+king           P       P       P       P       P       P       P       P       P       F       F
+
+PIECE × SQUARE PLACEMENT MATRIX (empty GT):
+              d1      c2      d4      c4      e4      a4      a6      d6      f6      h4      h6
+pawn           P       P       P       P       P       P       P       P       P       F       F
+rook           F       F       F       F       F       P       P       F       F       F       F
+bishop         P       P       P       P       P       P       P       P       P       F       F
+knight         P       P       F       P       F       P       P       P       P       F       F
+queen          P       F       F       F       F       P       F       F       F       F       F
+king           F       F       F       F       F       P       F       F       P       F       F
+
+PIECE × SQUARE FULL-EPISODE MATRIX (empty GT):
+              d1      c2      d4      c4      e4      a4      a6      d6      f6      h4      h6
+pawn           P       P       P       P       P       P       P       P       P       F       F
+rook           F       F       F       F       F       P       P       F       F       F       F
+bishop         P       P       P       P       P       P       P       P       P       F       F
+knight         P       P       F       P       F       P       P       P       P       F       F
+queen          P       F       F       F       F       P       F       F       F       F       F
+king           F       F       F       F       F       P       F       F       P       F       F
+
+QUEEN × DEST FULL-EPISODE MATRIX (d1 source, GT):
+              d1      c2      d4      c4      e4      a4      a6      d6      f6      h4      h6
+pawn           -       -       -       -       -       -       -       -       -       -       -
+rook           -       -       -       -       -       -       -       -       -       -       -
+bishop         -       -       -       -       -       -       -       -       -       -       -
+knight         -       -       -       -       -       -       -       -       -       -       -
+queen          -       P       P       F       P       F       F       P       P       F       F
+king           -       -       -       -       -       -       -       -       -       -       -
+
+PIECE × SQUARE PICKUP MATRIX (empty vision):
+              d1      c2      d4      c4      e4      a4      a6      d6      f6      h4      h6
+pawn           P       P       P       -       -       F       -       P       -       F       -
+rook           P       P       P       -       -       P       -       P       -       F       -
+bishop         P       P       P       -       -       P       -       P       -       F       -
+knight         P       P       P       -       -       P       -       P       -       F       -
+queen          P       P       P       -       -       P       -       P       -       F       -
+king           P       P       P       -       -       P       -       P       -       F       -
+
+PIECE × SQUARE FULL-EPISODE MATRIX (empty vision):
+              d1      c2      d4      c4      e4      a4      a6      d6      f6      h4      h6
+pawn           P       P       P       -       -       F       -       P       -       F       -
+rook           P       P       F       -       -       P       -       F       -       F       -
+bishop         P       P       P       -       -       P       -       P       -       F       -
+knight         P       P       F       -       -       P       -       F       -       F       -
+queen          P       P       F       -       -       F       -       P       -       F       -
+king           P       F       F       -       -       F       -       F       -       F       -
+
+POPULATED PICKUP (GT+vision):
+              a1      a2      b1      c1      c2      d1      d2      e1      e2      f1      f2      g1      h1      h2
+pawn           -       P       -       -       P       -       P       -       P       -       F       -       -       F
+rook           F       -       -       -       -       -       -       -       -       -       -       -       F       -
+bishop         -       -       -       P       -       -       -       -       -       F       -       -       -       -
+knight         -       -       F       -       -       -       -       -       -       -       -       F       -       -
+queen          -       -       -       -       -       P       -       -       -       -       -       -       -       -
+king           -       -       -       -       -       -       -       F       -       -       -       -       -       -
+
+POPULATED FULL EPISODE (GT+vision):
+              a1      a2      b1      c1      c2      d1      d2      e1      e2      f1      f2      g1      h1      h2
+pawn           -       P       -       -       P       -       P       -       P       -       F       -       -       F
+rook           F       -       -       -       -       -       -       -       -       -       -       -       F       -
+bishop         -       -       -       P       -       -       -       -       -       F       -       -       -       -
+knight         -       -       F       -       -       -       -       -       -       -       -       F       -       -
+queen          -       -       -       -       -       F       -       -       -       -       -       -       -       -
+king           -       -       -       -       -       -       -       F       -       -       -       -       -       -
+
+3 BIGGEST BOTTLENECKS:
+  1. PLACEMENT_POSITION_ERROR (23)
+  2. IK_NO_SOLUTION (20)
+  3. RELEASE_FAILURE (14)

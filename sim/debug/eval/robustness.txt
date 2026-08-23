@@ -1,0 +1,119 @@
+IK-REACHABLE ERROR REGION:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    T    T    C    T    T    T    T    T    T
+  +6    T    T    T    C    T    T    T    T    T
+  +4    R    R    T    T    T    T    T    T    T
+  +2    R    R    R    R    C    T    T    T    T
+  +0    R    R    R    R    R    C    C    C    C
+  -2    R    R    R    R    R    R    R    R    R
+  -4    R    R    R    R    R    R    R    R    R
+  -6    R    R    R    R    R    R    R    R    R
+  -8    R    R    R    R    R    R    R    R    R
+R=clean approach  C=reached but contact/knock  T=IK solved, track miss  N=no IK solution
+GRASP REGION CONDITIONAL ON REACHABLE APPROACH:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    .    .    .    .    .    .    .    .    .
+  +6    .    .    .    .    .    .    .    .    .
+  +4    n    n    .    .    .    .    .    .    .
+  +2    n    n    Y    Y    .    .    .    .    .
+  +0    n    n    Y    Y    Y    .    .    .    .
+  -2    n    n    Y    Y    Y    Y    Y    Y    Y
+  -4    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -6    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -8    Y    Y    Y    Y    Y    Y    Y    Y    Y
+(Y/n only where approach was clean; 37/47 lifts | . = not reachable cleanly)
+  (old: 37/47 lifts given clean approach)
+
+OLD COMPENSATION: [3.76, 12.66] mm
+OLD ROBUST RADIUS: 0 mm
+OLD BASELINE SHOVE: 2.7689587637862707
+
+BEST NEW COMPENSATION: [3.76, 8.66] mm
+NEW ROBUST RADIUS: 4 mm
+NEW BASELINE SHOVE: 6.609897272108473
+NEW WORST SUCCESSFUL SHOVE: 10.696544322303572
+NEW WORST SUCCESSFUL TILT: 3.4081140836126567
+NEW PROBE SCORE: 13/13  ik_fail=0
+
+GEOMETRY at old compensation, GT queen, requested pose error:
+
+  err=[0.0, 0.0] lift=True reason=None ik=True ee_err=1.4142314466666523 pre_ncon=0 first=['fixed'] ik_gap=1.1366543401275548
+  IK goal (open): ee[+354.5,  -68.5] queen[+351.2,  -81.2] fix->q[  -1.6,   -6.6] mov->q[ +13.6,  +42.3] pinch->q[  +6.0,  +17.8] gap=1.1366543401275548 contact=[] ncon=0
+  after descend: ee[+354.4,  -68.4] queen[+351.2,  -81.4] fix->q[  -1.7,   -6.5] mov->q[ +13.6,  +42.4] pinch->q[  +6.0,  +18.0] gap=0.8496234869904951 contact=[] ncon=0
+  joint_limit_min_rad=1.108851749515579 residual_mm=1.6237748854679601
+
+  err=[2.0, 0.0] lift=False reason=APPROACH_MISALIGNMENT ik=True ee_err=1.4127679539334526 pre_ncon=0 first=['fixed'] ik_gap=1.0122409705985238
+  IK goal (open): ee[+356.5,  -68.5] queen[+351.2,  -81.2] fix->q[  +0.4,   -6.7] mov->q[ +15.6,  +42.3] pinch->q[  +8.0,  +17.8] gap=1.0122409705985238 contact=[] ncon=0
+  after descend: ee[+356.3,  -68.4] queen[+347.9,  -71.3] fix->q[  +3.7,  -16.6] mov->q[ +18.9,  +32.3] pinch->q[ +11.3,   +7.9] gap=11.274035525469387 contact=[] ncon=0
+  joint_limit_min_rad=1.118981222639082 residual_mm=1.6243150080950843
+
+  err=[0.0, 2.0] lift=False reason=APPROACH_MISALIGNMENT ik=True ee_err=1.177582971577119 pre_ncon=0 first=['fixed'] ik_gap=-0.3429304509566392
+  IK goal (open): ee[+354.5,  -66.5] queen[+351.2,  -81.2] fix->q[  -1.5,   -4.7] mov->q[ +13.5,  +44.4] pinch->q[  +6.0,  +19.8] gap=-0.3429304509566392 contact=['fixed'] ncon=2
+  after descend: ee[+354.0,  -66.4] queen[+376.9,  -87.1] fix->q[ -27.6,   +1.2] mov->q[ -12.6,  +50.3] pinch->q[ -20.1,  +25.7] gap=7.782200834928054 contact=[] ncon=0
+  joint_limit_min_rad=1.1066943936830524 residual_mm=1.6237803724248985
+
+  err=[4.0, 0.0] lift=False reason=APPROACH_MISALIGNMENT ik=True ee_err=1.4114632000496272 pre_ncon=0 first=['fixed'] ik_gap=0.1069337170379219
+  IK goal (open): ee[+358.5,  -68.5] queen[+351.2,  -81.2] fix->q[  +2.5,   -6.7] mov->q[ +17.6,  +42.3] pinch->q[ +10.0,  +17.8] gap=0.1069337170379219 contact=[] ncon=0
+  after descend: ee[+358.3,  -68.4] queen[+347.7,  -70.5] fix->q[  +5.8,  -17.3] mov->q[ +20.9,  +31.6] pinch->q[ +13.4,   +7.1] gap=13.088263573891096 contact=[] ncon=0
+  joint_limit_min_rad=1.1291671549944953 residual_mm=1.6249952123232514
+
+  err=[0.0, 4.0] lift=False reason=IK_TRACK_FAIL ik=True ee_err=41.90093640051887 pre_ncon=3 first=['fixed'] ik_gap=-2.2104950559490533
+  IK goal (open): ee[+354.5,  -64.5] queen[+351.2,  -81.2] fix->q[  -1.4,   -2.7] mov->q[ +13.3,  +46.4] pinch->q[  +6.0,  +21.9] gap=-2.2104950559490533 contact=['fixed'] ncon=12
+  after descend: ee[+362.6,  -66.7] queen[+351.5,  -81.0] fix->q[  +7.0,   -5.3] mov->q[ +21.0,  +43.9] pinch->q[ +14.0,  +19.3] gap=-1.8801667977730527 contact=['fixed'] ncon=3
+  joint_limit_min_rad=1.1046009499720575 residual_mm=1.6238088767726524
+
+OLD ERROR MAP (lift):
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    n    n    n    n    n    n    n    n    n
+  +6    n    n    n    Y    n    n    n    n    n
+  +4    n    n    n    n    n    n    n    n    n
+  +2    n    n    Y    Y    n    n    n    n    n
+  +0    n    n    Y    Y    Y    n    n    Y    n
+  -2    n    n    Y    Y    Y    Y    Y    Y    Y
+  -4    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -6    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -8    Y    Y    Y    Y    Y    Y    Y    Y    Y
+(Y = lift success, n = lift fail, . = not run)
+NEW ERROR MAP (lift):
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    n    n    n    n    n    n    n    n    n
+  +6    n    n    Y    Y    n    n    n    n    n
+  +4    n    n    Y    Y    Y    n    n    Y    n
+  +2    n    n    Y    Y    Y    Y    Y    Y    Y
+  +0    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -2    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -4    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -6    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -8    Y    Y    Y    Y    Y    Y    Y    Y    Y
+(Y = lift success, n = lift fail, . = not run)
+NEW IK-REACHABLE:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    R    R    T    T    T    T    T    T    T
+  +6    R    R    R    R    C    T    T    T    T
+  +4    R    R    R    R    R    C    C    C    C
+  +2    R    R    R    R    R    R    R    R    R
+  +0    R    R    R    R    R    R    R    R    R
+  -2    R    R    R    R    R    R    R    R    R
+  -4    R    R    R    R    R    R    R    R    R
+  -6    R    R    R    R    R    R    R    R    R
+  -8    R    R    R    R    R    R    R    R    R
+R=clean approach  C=reached but contact/knock  T=IK solved, track miss  N=no IK solution
+NEW GRASP | APPROACH:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    n    n    .    .    .    .    .    .    .
+  +6    n    n    Y    Y    .    .    .    .    .
+  +4    n    n    Y    Y    Y    .    .    .    .
+  +2    n    n    Y    Y    Y    Y    Y    Y    Y
+  +0    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -2    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -4    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -6    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -8    Y    Y    Y    Y    Y    Y    Y    Y    Y
+(Y/n only where approach was clean; 55/65 lifts | . = not reachable cleanly)
+  (new: 55/65 lifts given clean approach)
+
+VISION SAMPLES (1 raw + depth N(0,2mm)): n=17 mean_xy_r=[-3.6633439216188193, -1.8123712547011617, 4.087709125677859]
+  in new success cells: 17/17
+  hypot <= new robust_radius: 5/17
+CURRENT VISION LIKELY ADEQUATE AFTER CHANGE?: yes
+DOMINANT REMAINING GRASP FAILURE: ('IK_TRACK_FAIL', 11)

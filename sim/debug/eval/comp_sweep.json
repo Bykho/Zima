@@ -1,0 +1,427 @@
+[
+  {
+    "offset_mm": [
+      -0.2400000000000002,
+      8.66
+    ],
+    "baseline_shove_mm": 7.540794729411843,
+    "baseline_lift": true,
+    "successes": 11,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 0,
+    "robust_radius_mm": 2,
+    "min_fail_radius_mm": 2.8284271247461903,
+    "worst_successful_shove_mm": 11.371168259515864,
+    "worst_successful_tilt_deg": 7.8109543708984175,
+    "mean_successful_shove_mm": 7.16865889815534
+  },
+  {
+    "offset_mm": [
+      -0.2400000000000002,
+      10.66
+    ],
+    "baseline_shove_mm": 4.803526330023992,
+    "baseline_lift": true,
+    "successes": 10,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 0,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 2.0,
+    "worst_successful_shove_mm": 9.678151165794448,
+    "worst_successful_tilt_deg": 7.8109543708984175,
+    "mean_successful_shove_mm": 4.990874443226632
+  },
+  {
+    "offset_mm": [
+      -0.2400000000000002,
+      12.66
+    ],
+    "baseline_shove_mm": 2.5074682244042683,
+    "baseline_lift": true,
+    "successes": 8,
+    "n": 13,
+    "ik_failures": 1,
+    "preclose_collisions": 0,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 2.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 5.711209173083472,
+    "mean_successful_shove_mm": 5.409031702999798
+  },
+  {
+    "offset_mm": [
+      -0.2400000000000002,
+      14.66
+    ],
+    "baseline_shove_mm": 0.9847847917998156,
+    "baseline_lift": true,
+    "successes": 5,
+    "n": 13,
+    "ik_failures": 3,
+    "preclose_collisions": 1,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 2.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 5.711209173083472,
+    "mean_successful_shove_mm": 5.576581421650202
+  },
+  {
+    "offset_mm": [
+      -0.2400000000000002,
+      16.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 4,
+    "n": 13,
+    "ik_failures": 5,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 5.711209173083472,
+    "mean_successful_shove_mm": 5.2214035968142065
+  },
+  {
+    "offset_mm": [
+      1.7599999999999998,
+      8.66
+    ],
+    "baseline_shove_mm": 7.047874337742642,
+    "baseline_lift": true,
+    "successes": 13,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 0,
+    "robust_radius_mm": 4,
+    "min_fail_radius_mm": null,
+    "worst_successful_shove_mm": 11.25683165501012,
+    "worst_successful_tilt_deg": 7.8109543708984175,
+    "mean_successful_shove_mm": 6.785750875833807
+  },
+  {
+    "offset_mm": [
+      1.7599999999999998,
+      10.66
+    ],
+    "baseline_shove_mm": 5.079593022549256,
+    "baseline_lift": true,
+    "successes": 12,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 0,
+    "robust_radius_mm": 2,
+    "min_fail_radius_mm": 4.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 5.711209173083472,
+    "mean_successful_shove_mm": 6.168259908541468
+  },
+  {
+    "offset_mm": [
+      1.7599999999999998,
+      12.66
+    ],
+    "baseline_shove_mm": 2.594867766221161,
+    "baseline_lift": true,
+    "successes": 9,
+    "n": 13,
+    "ik_failures": 1,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 2,
+    "min_fail_radius_mm": 2.8284271247461903,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 5.711209173083472,
+    "mean_successful_shove_mm": 5.292576924889052
+  },
+  {
+    "offset_mm": [
+      1.7599999999999998,
+      14.66
+    ],
+    "baseline_shove_mm": 16.992259995801774,
+    "baseline_lift": true,
+    "successes": 7,
+    "n": 13,
+    "ik_failures": 4,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 2.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 5.711209173083472,
+    "mean_successful_shove_mm": 4.475576277116216
+  },
+  {
+    "offset_mm": [
+      1.7599999999999998,
+      16.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 4,
+    "n": 13,
+    "ik_failures": 7,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 4.812652580715754,
+    "mean_successful_shove_mm": 5.24325348226843
+  },
+  {
+    "offset_mm": [
+      3.76,
+      8.66
+    ],
+    "baseline_shove_mm": 6.609897272108473,
+    "baseline_lift": true,
+    "successes": 13,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 0,
+    "robust_radius_mm": 4,
+    "min_fail_radius_mm": null,
+    "worst_successful_shove_mm": 10.696544322303572,
+    "worst_successful_tilt_deg": 3.4081140836126567,
+    "mean_successful_shove_mm": 6.614163072853298
+  },
+  {
+    "offset_mm": [
+      3.76,
+      10.66
+    ],
+    "baseline_shove_mm": 4.853859091672291,
+    "baseline_lift": true,
+    "successes": 11,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 2,
+    "min_fail_radius_mm": 2.8284271247461903,
+    "worst_successful_shove_mm": 8.656986427789322,
+    "worst_successful_tilt_deg": 5.29155504290301,
+    "mean_successful_shove_mm": 5.082187145344329
+  },
+  {
+    "offset_mm": [
+      3.76,
+      12.66
+    ],
+    "baseline_shove_mm": 2.7689587637862707,
+    "baseline_lift": true,
+    "successes": 8,
+    "n": 13,
+    "ik_failures": 2,
+    "preclose_collisions": 3,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 2.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 5.711209173083472,
+    "mean_successful_shove_mm": 5.678291337752084
+  },
+  {
+    "offset_mm": [
+      3.76,
+      14.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 5,
+    "n": 13,
+    "ik_failures": 6,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 4.812652580715754,
+    "mean_successful_shove_mm": 5.638946081856263
+  },
+  {
+    "offset_mm": [
+      3.76,
+      16.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 3,
+    "n": 13,
+    "ik_failures": 9,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 2.120566489083201,
+    "mean_successful_shove_mm": 6.72077337827967
+  },
+  {
+    "offset_mm": [
+      5.76,
+      8.66
+    ],
+    "baseline_shove_mm": 6.073961811566882,
+    "baseline_lift": true,
+    "successes": 12,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 1,
+    "robust_radius_mm": 2,
+    "min_fail_radius_mm": 4.0,
+    "worst_successful_shove_mm": 9.874883889284035,
+    "worst_successful_tilt_deg": 2.6942576728810352,
+    "mean_successful_shove_mm": 6.3421329956456765
+  },
+  {
+    "offset_mm": [
+      5.76,
+      10.66
+    ],
+    "baseline_shove_mm": 4.019426565473179,
+    "baseline_lift": true,
+    "successes": 10,
+    "n": 13,
+    "ik_failures": 1,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 2.0,
+    "worst_successful_shove_mm": 8.041455863535994,
+    "worst_successful_tilt_deg": 2.845392958024683,
+    "mean_successful_shove_mm": 4.909298150626815
+  },
+  {
+    "offset_mm": [
+      5.76,
+      12.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 7,
+    "n": 13,
+    "ik_failures": 3,
+    "preclose_collisions": 4,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 6.073961811566882,
+    "worst_successful_tilt_deg": 2.792860564811577,
+    "mean_successful_shove_mm": 3.5823381748170937
+  },
+  {
+    "offset_mm": [
+      5.76,
+      14.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 3,
+    "n": 13,
+    "ik_failures": 7,
+    "preclose_collisions": 3,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 16.992259995801774,
+    "worst_successful_tilt_deg": 2.120566489083201,
+    "mean_successful_shove_mm": 7.926881775020408
+  },
+  {
+    "offset_mm": [
+      5.76,
+      16.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 0,
+    "n": 13,
+    "ik_failures": 11,
+    "preclose_collisions": 2,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": null,
+    "worst_successful_tilt_deg": null,
+    "mean_successful_shove_mm": null
+  },
+  {
+    "offset_mm": [
+      7.76,
+      8.66
+    ],
+    "baseline_shove_mm": 5.394174935850694,
+    "baseline_lift": true,
+    "successes": 12,
+    "n": 13,
+    "ik_failures": 0,
+    "preclose_collisions": 1,
+    "robust_radius_mm": 2,
+    "min_fail_radius_mm": 4.0,
+    "worst_successful_shove_mm": 9.236431161135645,
+    "worst_successful_tilt_deg": 3.381175904195384,
+    "mean_successful_shove_mm": 5.620139994951508
+  },
+  {
+    "offset_mm": [
+      7.76,
+      10.66
+    ],
+    "baseline_shove_mm": 3.395107209854153,
+    "baseline_lift": true,
+    "successes": 10,
+    "n": 13,
+    "ik_failures": 1,
+    "preclose_collisions": 3,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 2.0,
+    "worst_successful_shove_mm": 7.22554518792138,
+    "worst_successful_tilt_deg": 2.6298654719435994,
+    "mean_successful_shove_mm": 4.212619253797073
+  },
+  {
+    "offset_mm": [
+      7.76,
+      12.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 6,
+    "n": 13,
+    "ik_failures": 4,
+    "preclose_collisions": 4,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 5.394174935850694,
+    "worst_successful_tilt_deg": 2.6298654719435994,
+    "mean_successful_shove_mm": 3.3007334099968286
+  },
+  {
+    "offset_mm": [
+      7.76,
+      14.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 2,
+    "n": 13,
+    "ik_failures": 8,
+    "preclose_collisions": 4,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": 3.395107209854153,
+    "worst_successful_tilt_deg": 2.6298654719435994,
+    "mean_successful_shove_mm": 2.3826466124999364
+  },
+  {
+    "offset_mm": [
+      7.76,
+      16.66
+    ],
+    "baseline_shove_mm": null,
+    "baseline_lift": false,
+    "successes": 0,
+    "n": 13,
+    "ik_failures": 12,
+    "preclose_collisions": 1,
+    "robust_radius_mm": 0,
+    "min_fail_radius_mm": 0.0,
+    "worst_successful_shove_mm": null,
+    "worst_successful_tilt_deg": null,
+    "mean_successful_shove_mm": null
+  }
+]

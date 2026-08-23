@@ -1,0 +1,2598 @@
+[
+  {
+    "scenario": "pos_x_+0mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3512499989959522,
+      -0.08124999433609902,
+      0.019962766232146986
+    ],
+    "pose_used_for_grasp": [
+      0.3512499989988143,
+      -0.08124999666711813,
+      0.019962813557791333
+    ],
+    "perception_error": [
+      2.8620994463324223e-09,
+      -2.331019113843702e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.7689587637862707,
+    "tilt_after_close": 1.99112230967109,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.297851335666278,
+        8.942706763355496,
+        -16.61851370562983
+      ],
+      "tilt_deg": 9.380059733916646
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.71364475953112,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.7689587637862707,
+    "close_tilt_deg": 1.99112230967109,
+    "release_position_error_mm": 17.71364475953112,
+    "final_position_error_mm": 26.31052131204468,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.297851335666278,
+        8.942706763355496,
+        -16.61851370562983
+      ],
+      "tilt_deg": 9.380059733916646
+    }
+  },
+  {
+    "scenario": "pos_x_+1mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3522499988100139,
+      -0.08124999410586418,
+      0.01996277082481596
+    ],
+    "pose_used_for_grasp": [
+      0.3522499988915907,
+      -0.08124999641349666,
+      0.019962820085112326
+    ],
+    "perception_error": [
+      8.157680086995356e-08,
+      -2.30763247399679e-06
+    ],
+    "offset_xy_mm": [
+      1.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.838191725345354,
+    "tilt_after_close": 2.142164837748576,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.324950554985884,
+        9.04892329237751,
+        -16.633527348069453
+      ],
+      "tilt_deg": 9.13146582591115
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.227185002646564,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.838191725345354,
+    "close_tilt_deg": 2.142164837748576,
+    "release_position_error_mm": 16.227185002646564,
+    "final_position_error_mm": 23.512459602416143,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.324950554985884,
+        9.04892329237751,
+        -16.633527348069453
+      ],
+      "tilt_deg": 9.13146582591115
+    }
+  },
+  {
+    "scenario": "pos_x_-1mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35024999931154305,
+      -0.0812499941843497,
+      0.019962761768696283
+    ],
+    "pose_used_for_grasp": [
+      0.3502499989987991,
+      -0.08124999817758854,
+      0.01996269860055373
+    ],
+    "perception_error": [
+      -3.127439418548761e-07,
+      -3.993238850696912e-06
+    ],
+    "offset_xy_mm": [
+      -1.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 3.0128695192172987,
+    "tilt_after_close": 1.917599148395852,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.38170907635219,
+        8.754449155741366,
+        -16.700822519426325
+      ],
+      "tilt_deg": 9.439108059890424
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.301915702428403,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 3.0128695192172987,
+    "close_tilt_deg": 1.917599148395852,
+    "release_position_error_mm": 16.301915702428403,
+    "final_position_error_mm": 24.325779959462146,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.38170907635219,
+        8.754449155741366,
+        -16.700822519426325
+      ],
+      "tilt_deg": 9.439108059890424
+    }
+  },
+  {
+    "scenario": "pos_x_+2mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35324999834823056,
+      -0.08124999913269401,
+      0.019962898758087603
+    ],
+    "pose_used_for_grasp": [
+      0.35324999899223,
+      -0.08124999658121028,
+      0.019962806115993846
+    ],
+    "perception_error": [
+      6.439994093554446e-07,
+      2.5514837326268136e-06
+    ],
+    "offset_xy_mm": [
+      2.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.930769746134329,
+    "tilt_after_close": 2.0681036535818005,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.229370646711384,
+        9.004099952731881,
+        -16.602336985109122
+      ],
+      "tilt_deg": 9.636897713285087
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.450549603662683,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.930769746134329,
+    "close_tilt_deg": 2.0681036535818005,
+    "release_position_error_mm": 17.450549603662683,
+    "final_position_error_mm": 27.64503958034306,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.229370646711384,
+        9.004099952731881,
+        -16.602336985109122
+      ],
+      "tilt_deg": 9.636897713285087
+    }
+  },
+  {
+    "scenario": "pos_x_-2mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3492500001056485,
+      -0.08124999922711566,
+      0.019962697023212
+    ],
+    "pose_used_for_grasp": [
+      0.3492499985995763,
+      -0.08124999437258616,
+      0.019962632745550293
+    ],
+    "perception_error": [
+      -1.5060722113879876e-06,
+      4.8545295006086064e-06
+    ],
+    "offset_xy_mm": [
+      -2.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.734797642993723,
+    "tilt_after_close": 1.829018530298566,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.446238701602676,
+        8.763140832889874,
+        -16.697501665408318
+      ],
+      "tilt_deg": 9.197610146930273
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.256490424692075,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.734797642993723,
+    "close_tilt_deg": 1.829018530298566,
+    "release_position_error_mm": 16.256490424692075,
+    "final_position_error_mm": 24.08385159035611,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.446238701602676,
+        8.763140832889874,
+        -16.697501665408318
+      ],
+      "tilt_deg": 9.197610146930273
+    }
+  },
+  {
+    "scenario": "pos_x_+3mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35424999833683996,
+      -0.08124999367956859,
+      0.019962767780696045
+    ],
+    "pose_used_for_grasp": [
+      0.3542499984020315,
+      -0.08124999591433894,
+      0.019962818455080338
+    ],
+    "perception_error": [
+      6.519151884987195e-08,
+      -2.234770354880844e-06
+    ],
+    "offset_xy_mm": [
+      3.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 1.4043276170584786,
+    "tilt_after_close": 2.1704358007074145,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.38281756514579,
+        9.137522383582425,
+        -16.626488154739242
+      ],
+      "tilt_deg": 9.124908982071087
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.43411726859688,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 1.4043276170584786,
+    "close_tilt_deg": 2.1704358007074145,
+    "release_position_error_mm": 17.43411726859688,
+    "final_position_error_mm": 23.242702407243762,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.38281756514579,
+        9.137522383582425,
+        -16.626488154739242
+      ],
+      "tilt_deg": 9.124908982071087
+    }
+  },
+  {
+    "scenario": "pos_x_-3mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.34825000050468197,
+      -0.08124999934587887,
+      0.019962717352075707
+    ],
+    "pose_used_for_grasp": [
+      0.34824999934143963,
+      -0.0812499945635614,
+      0.01996265375880146
+    ],
+    "perception_error": [
+      -1.1632423357887944e-06,
+      4.7823174725847295e-06
+    ],
+    "offset_xy_mm": [
+      -3.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 3.0268680568032282,
+    "tilt_after_close": 1.80040823123839,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.429731768584437,
+        8.669486433849045,
+        -16.640854567235248
+      ],
+      "tilt_deg": 9.32025233197114
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 15.912075802101116,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 3.0268680568032282,
+    "close_tilt_deg": 1.80040823123839,
+    "release_position_error_mm": 15.912075802101116,
+    "final_position_error_mm": 16.014022350553617,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.429731768584437,
+        8.669486433849045,
+        -16.640854567235248
+      ],
+      "tilt_deg": 9.32025233197114
+    }
+  },
+  {
+    "scenario": "pos_x_+5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3562499982717997,
+      -0.08124999844653456,
+      0.019962834846897967
+    ],
+    "pose_used_for_grasp": [
+      0.35624999872176727,
+      -0.0812499953210436,
+      0.01996274640891755
+    ],
+    "perception_error": [
+      4.4996756320969666e-07,
+      3.125490963262756e-06
+    ],
+    "offset_xy_mm": [
+      5.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.831147045543997,
+    "tilt_after_close": 2.3511656603423257,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.107052947841273,
+        9.172870328003732,
+        -16.6053248556037
+      ],
+      "tilt_deg": 9.86239289519363
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.392455106012722,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.831147045543997,
+    "close_tilt_deg": 2.3511656603423257,
+    "release_position_error_mm": 17.392455106012722,
+    "final_position_error_mm": 27.60834826801118,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.107052947841273,
+        9.172870328003732,
+        -16.6053248556037
+      ],
+      "tilt_deg": 9.86239289519363
+    }
+  },
+  {
+    "scenario": "pos_x_-5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.34625000099593223,
+      -0.08124999705127167,
+      0.019963079560847946
+    ],
+    "pose_used_for_grasp": [
+      0.34625000010413065,
+      -0.0812499996803957,
+      0.019963119910600173
+    ],
+    "perception_error": [
+      -8.918015770298382e-07,
+      -2.6291240295961416e-06
+    ],
+    "offset_xy_mm": [
+      -5.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 3.0313946272902568,
+    "tilt_after_close": 2.1342190135942154,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.540522869570072,
+        8.515013925516689,
+        -16.701593952550333
+      ],
+      "tilt_deg": 9.185256032055591
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.680038318879784,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 3.0313946272902568,
+    "close_tilt_deg": 2.1342190135942154,
+    "release_position_error_mm": 16.680038318879784,
+    "final_position_error_mm": 23.22861897615683,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.540522869570072,
+        8.515013925516689,
+        -16.701593952550333
+      ],
+      "tilt_deg": 9.185256032055591
+    }
+  },
+  {
+    "scenario": "pos_x_+7mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3582499979944093,
+      -0.08124999862053692,
+      0.019962831366138096
+    ],
+    "pose_used_for_grasp": [
+      0.35824999828676507,
+      -0.08124999561132648,
+      0.019962740962699087
+    ],
+    "perception_error": [
+      2.923557507195085e-07,
+      3.0092104363887984e-06
+    ],
+    "offset_xy_mm": [
+      7.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.525228678741513,
+    "tilt_after_close": 2.319297531379001,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        10.993138966216323,
+        9.353369511829339,
+        -16.750655472424523
+      ],
+      "tilt_deg": 9.635284849227448
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.997167478278826,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.525228678741513,
+    "close_tilt_deg": 2.319297531379001,
+    "release_position_error_mm": 16.997167478278826,
+    "final_position_error_mm": 23.193414580118958,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        10.993138966216323,
+        9.353369511829339,
+        -16.750655472424523
+      ],
+      "tilt_deg": 9.635284849227448
+    }
+  },
+  {
+    "scenario": "pos_x_-7mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.34424999945602003,
+      -0.08125000185089386,
+      0.019963146848793818
+    ],
+    "pose_used_for_grasp": [
+      0.3442499992626377,
+      -0.08124999825236183,
+      0.019963080805976953
+    ],
+    "perception_error": [
+      -1.9338231016519103e-07,
+      3.598532027915269e-06
+    ],
+    "offset_xy_mm": [
+      -7.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.401874709630834,
+    "tilt_after_close": 2.4220717756453136,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.944057268139726,
+        8.126697443389586,
+        -16.696728455215553
+      ],
+      "tilt_deg": 9.162372895209714
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.043411374821474,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.401874709630834,
+    "close_tilt_deg": 2.4220717756453136,
+    "release_position_error_mm": 16.043411374821474,
+    "final_position_error_mm": 24.33772616733843,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.944057268139726,
+        8.126697443389586,
+        -16.696728455215553
+      ],
+      "tilt_deg": 9.162372895209714
+    }
+  },
+  {
+    "scenario": "pos_x_+10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.36124999919461515,
+      -0.08124999945588404,
+      0.01996279739953678
+    ],
+    "pose_used_for_grasp": [
+      0.3612499962044427,
+      -0.08124999547852405,
+      0.019962703442098717
+    ],
+    "perception_error": [
+      -2.9901724429848286e-06,
+      3.977359996909513e-06
+    ],
+    "offset_xy_mm": [
+      10.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": null,
+    "tilt_after_close": null,
+    "grasp_success": false,
+    "lift_success": false,
+    "T_gripper_object": null,
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": null,
+    "failure_reason": "APPROACH_MISALIGNMENT",
+    "stage_flags": [
+      "GRASP_FAIL",
+      "LIFT_FAIL",
+      "PLACEMENT_SKIP",
+      "RETREAT_SKIP"
+    ],
+    "success": false,
+    "close_shove_xy_mm": null,
+    "close_tilt_deg": null,
+    "release_position_error_mm": null,
+    "final_position_error_mm": null,
+    "T_gripper_queen_lift": null
+  },
+  {
+    "scenario": "pos_x_-10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3412499969758396,
+      -0.08124999598507918,
+      0.019962636792264968
+    ],
+    "pose_used_for_grasp": [
+      0.34124999518925087,
+      -0.08124998995555444,
+      0.01996258590854332
+    ],
+    "perception_error": [
+      -1.7865887103063471e-06,
+      6.02952474060281e-06
+    ],
+    "offset_xy_mm": [
+      -10.0,
+      0.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.8678595269056832,
+    "tilt_after_close": 2.3782356029241285,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.829479023897369,
+        8.110681214007966,
+        -16.69507418301215
+      ],
+      "tilt_deg": 8.913203344625101
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.860847684422293,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.8678595269056832,
+    "close_tilt_deg": 2.3782356029241285,
+    "release_position_error_mm": 16.860847684422293,
+    "final_position_error_mm": 34.04064550342476,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.829479023897369,
+        8.110681214007966,
+        -16.69507418301215
+      ],
+      "tilt_deg": 8.913203344625101
+    }
+  },
+  {
+    "scenario": "pos_y_+1mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3512499998197438,
+      -0.0802499991620283,
+      0.019962701381589055
+    ],
+    "pose_used_for_grasp": [
+      0.35124999816699704,
+      -0.08024999432148992,
+      0.01996263607424685
+    ],
+    "perception_error": [
+      -1.6527467727733836e-06,
+      4.8405383729077656e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      1.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 1.1432439536735104,
+    "tilt_after_close": 2.5588002724504006,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        12.15209691562218,
+        8.430665669068231,
+        -16.71346621476515
+      ],
+      "tilt_deg": 9.061713828934804
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.703965746146963,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 1.1432439536735104,
+    "close_tilt_deg": 2.5588002724504006,
+    "release_position_error_mm": 16.703965746146963,
+    "final_position_error_mm": 28.202239679456333,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        12.15209691562218,
+        8.430665669068231,
+        -16.71346621476515
+      ],
+      "tilt_deg": 9.061713828934804
+    }
+  },
+  {
+    "scenario": "pos_y_-1mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3512499989548619,
+      -0.08224999404583669,
+      0.019962760632670603
+    ],
+    "pose_used_for_grasp": [
+      0.35124999897021797,
+      -0.08224999636431439,
+      0.019962810663429965
+    ],
+    "perception_error": [
+      1.5356049765102853e-08,
+      -2.318477701490629e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      -1.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 3.0162656675426827,
+    "tilt_after_close": 2.041611975223091,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.338475943860349,
+        8.870161725805014,
+        -16.647128778650757
+      ],
+      "tilt_deg": 9.453738291562534
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.442535634080574,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 3.0162656675426827,
+    "close_tilt_deg": 2.041611975223091,
+    "release_position_error_mm": 17.442535634080574,
+    "final_position_error_mm": 27.6106948181139,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.338475943860349,
+        8.870161725805014,
+        -16.647128778650757
+      ],
+      "tilt_deg": 9.453738291562534
+    }
+  },
+  {
+    "scenario": "pos_y_+2mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35124999988032396,
+      -0.07924999938288652,
+      0.01996270895724717
+    ],
+    "pose_used_for_grasp": [
+      0.35124999827722053,
+      -0.07924999459959692,
+      0.01996264573770098
+    ],
+    "perception_error": [
+      -1.6031034277830258e-06,
+      4.783289597742879e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      2.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.599969531012881,
+    "tilt_after_close": 1.9816807100677802,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.425294742996156,
+        8.821121840323492,
+        -16.71905656456905
+      ],
+      "tilt_deg": 9.277989250163099
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.126843830459936,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.599969531012881,
+    "close_tilt_deg": 1.9816807100677802,
+    "release_position_error_mm": 16.126843830459936,
+    "final_position_error_mm": 23.89722453214684,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.425294742996156,
+        8.821121840323492,
+        -16.71905656456905
+      ],
+      "tilt_deg": 9.277989250163099
+    }
+  },
+  {
+    "scenario": "pos_y_-2mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35125000025776404,
+      -0.08325000000489131,
+      0.019962762524322532
+    ],
+    "pose_used_for_grasp": [
+      0.3512499979926141,
+      -0.08324999606580456,
+      0.01996268110203365
+    ],
+    "perception_error": [
+      -2.2651499564929622e-06,
+      3.939086751225673e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      -2.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 1.4781920257700556,
+    "tilt_after_close": 1.9107039900673772,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.720440006552069,
+        8.805370924448159,
+        -16.751380769298127
+      ],
+      "tilt_deg": 8.758554373768142
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.435898099893173,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 1.4781920257700556,
+    "close_tilt_deg": 1.9107039900673772,
+    "release_position_error_mm": 16.435898099893173,
+    "final_position_error_mm": 23.275047553620603,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.720440006552069,
+        8.805370924448159,
+        -16.751380769298127
+      ],
+      "tilt_deg": 8.758554373768142
+    }
+  },
+  {
+    "scenario": "pos_y_+3mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35124999993840594,
+      -0.0782499996539695,
+      0.01996271651174692
+    ],
+    "pose_used_for_grasp": [
+      0.3512499983879145,
+      -0.07824999492699566,
+      0.01996265532629929
+    ],
+    "perception_error": [
+      -1.550491457447123e-06,
+      4.7269738401301e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      3.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 3.066597795827094,
+    "tilt_after_close": 1.9360925071805315,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.242482292362233,
+        8.88972486041637,
+        -16.627951004059305
+      ],
+      "tilt_deg": 9.406926432149811
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.511054160418457,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 3.066597795827094,
+    "close_tilt_deg": 1.9360925071805315,
+    "release_position_error_mm": 17.511054160418457,
+    "final_position_error_mm": 27.77976924645198,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.242482292362233,
+        8.88972486041637,
+        -16.627951004059305
+      ],
+      "tilt_deg": 9.406926432149811
+    }
+  },
+  {
+    "scenario": "pos_y_-3mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35125000020039016,
+      -0.08424999976392579,
+      0.019962759640685727
+    ],
+    "pose_used_for_grasp": [
+      0.3512499979576764,
+      -0.08424999576707341,
+      0.019962675889267204
+    ],
+    "perception_error": [
+      -2.2427137369440686e-06,
+      3.996852376841886e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      -3.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.632577289967553,
+    "tilt_after_close": 2.101910315634631,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.530990076191255,
+        8.726333734530503,
+        -16.74437396397689
+      ],
+      "tilt_deg": 9.385226572219057
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.680817771574496,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.632577289967553,
+    "close_tilt_deg": 2.101910315634631,
+    "release_position_error_mm": 16.680817771574496,
+    "final_position_error_mm": 23.828502555494772,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.530990076191255,
+        8.726333734530503,
+        -16.74437396397689
+      ],
+      "tilt_deg": 9.385226572219057
+    }
+  },
+  {
+    "scenario": "pos_y_+5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.351250000046433,
+      -0.07625000013049223,
+      0.019962731616571062
+    ],
+    "pose_used_for_grasp": [
+      0.35124999860803957,
+      -0.0762499955142054,
+      0.0199626743290509
+    ],
+    "perception_error": [
+      -1.4383934043848967e-06,
+      4.616286825021021e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 10.38463578482711,
+    "tilt_after_close": 3.1891779058226284,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        9.433145978733842,
+        10.655555495964757,
+        -16.77573801772066
+      ],
+      "tilt_deg": 5.22934487387349
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 15.600944146100094,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 10.38463578482711,
+    "close_tilt_deg": 3.1891779058226284,
+    "release_position_error_mm": 15.600944146100094,
+    "final_position_error_mm": 15.747617987732692,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        9.433145978733842,
+        10.655555495964757,
+        -16.77573801772066
+      ],
+      "tilt_deg": 5.22934487387349
+    }
+  },
+  {
+    "scenario": "pos_y_-5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35124999683904434,
+      -0.0862499967298801,
+      0.019962846643787623
+    ],
+    "pose_used_for_grasp": [
+      0.35124999877077656,
+      -0.086250000140271,
+      0.019962753423571945
+    ],
+    "perception_error": [
+      1.9317322186296337e-06,
+      -3.4103909002380917e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      -5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.41972419706389,
+    "tilt_after_close": 2.0449143411244473,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.389727922968609,
+        8.903493640169856,
+        -16.69447663051844
+      ],
+      "tilt_deg": 9.370178738163002
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.787226150370994,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.41972419706389,
+    "close_tilt_deg": 2.0449143411244473,
+    "release_position_error_mm": 16.787226150370994,
+    "final_position_error_mm": 24.07631283050258,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.389727922968609,
+        8.903493640169856,
+        -16.69447663051844
+      ],
+      "tilt_deg": 9.370178738163002
+    }
+  },
+  {
+    "scenario": "pos_y_+7mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35125000017430524,
+      -0.07424999618343775,
+      0.019963038460583376
+    ],
+    "pose_used_for_grasp": [
+      0.3512499974529384,
+      -0.07424999862275808,
+      0.019963053265366345
+    ],
+    "perception_error": [
+      -2.7213668540859715e-06,
+      -2.4393203290618004e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      7.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 3.024544389935762,
+    "tilt_after_close": 1.8836336587458182,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.158471981266214,
+        8.967445462085701,
+        -16.624995446770715
+      ],
+      "tilt_deg": 9.381419352625905
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.255213418845045,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 3.024544389935762,
+    "close_tilt_deg": 1.8836336587458182,
+    "release_position_error_mm": 17.255213418845045,
+    "final_position_error_mm": 28.76336013727019,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.158471981266214,
+        8.967445462085701,
+        -16.624995446770715
+      ],
+      "tilt_deg": 9.381419352625905
+    }
+  },
+  {
+    "scenario": "pos_y_-7mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3512499967877568,
+      -0.08824999620182647,
+      0.019962836833349644
+    ],
+    "pose_used_for_grasp": [
+      0.3512499986802937,
+      -0.08824999959005438,
+      0.019962746537268046
+    ],
+    "perception_error": [
+      1.8925369049682672e-06,
+      -3.3882279065755583e-06
+    ],
+    "offset_xy_mm": [
+      0.0,
+      -7.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.489598250519177,
+    "tilt_after_close": 2.0490413731658106,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.556484631495016,
+        8.836932990445488,
+        -16.706774122947824
+      ],
+      "tilt_deg": 9.123488720647524
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.65939158090639,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.489598250519177,
+    "close_tilt_deg": 2.0490413731658106,
+    "release_position_error_mm": 16.65939158090639,
+    "final_position_error_mm": 24.51489609609499,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.556484631495016,
+        8.836932990445488,
+        -16.706774122947824
+      ],
+      "tilt_deg": 9.123488720647524
+    }
+  },
+  {
+    "scenario": "pos_y_+10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.351249999407961,
+      -0.07124999640877197,
+      0.019962928871904217
+    ],
+    "pose_used_for_grasp": [
+      0.3512500010226073,
+      -0.07124999662005245,
+      0.019963003471538725
+    ],
+    "perception_error": [
+      1.6146463055477511e-06,
+      -2.1128047922314153e-07
+    ],
+    "offset_xy_mm": [
+      0.0,
+      10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.707270701297301,
+    "tilt_after_close": 2.0713912012694213,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.035178702583766,
+        9.097749802843541,
+        -16.601510748521406
+      ],
+      "tilt_deg": 9.020006507313788
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.985022465661107,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.707270701297301,
+    "close_tilt_deg": 2.0713912012694213,
+    "release_position_error_mm": 16.985022465661107,
+    "final_position_error_mm": 29.74263467608035,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.035178702583766,
+        9.097749802843541,
+        -16.601510748521406
+      ],
+      "tilt_deg": 9.020006507313788
+    }
+  },
+  {
+    "scenario": "pos_y_-10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35125000044557747,
+      -0.09125018468199435,
+      0.019963089248771018
+    ],
+    "pose_used_for_grasp": [
+      0.35124999962336806,
+      -0.0912502501430595,
+      0.019962870126169548
+    ],
+    "perception_error": [
+      -8.222094116661083e-07,
+      -6.546106515181727e-05
+    ],
+    "offset_xy_mm": [
+      0.0,
+      -10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.52679266065836,
+    "tilt_after_close": 2.151330110574338,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.856021673362331,
+        8.68708713290084,
+        -16.743172457816037
+      ],
+      "tilt_deg": 8.97625800001785
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 15.821930130236789,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.52679266065836,
+    "close_tilt_deg": 2.151330110574338,
+    "release_position_error_mm": 15.821930130236789,
+    "final_position_error_mm": 23.145909292337002,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.856021673362331,
+        8.68708713290084,
+        -16.743172457816037
+      ],
+      "tilt_deg": 8.97625800001785
+    }
+  },
+  {
+    "scenario": "pos_xy_+5_+5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3562499995956299,
+      -0.07624999911162848,
+      0.019962707368264155
+    ],
+    "pose_used_for_grasp": [
+      0.3562499973730745,
+      -0.0762499945024681,
+      0.019962643580894095
+    ],
+    "perception_error": [
+      -2.2225554174859496e-06,
+      4.609160386692679e-06
+    ],
+    "offset_xy_mm": [
+      5.0,
+      5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.451815565825872,
+    "tilt_after_close": 2.2525669844190612,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        10.973769801913232,
+        9.337915283139239,
+        -16.741814223204084
+      ],
+      "tilt_deg": 9.55047445984199
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.978925285596937,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.451815565825872,
+    "close_tilt_deg": 2.2525669844190612,
+    "release_position_error_mm": 16.978925285596937,
+    "final_position_error_mm": 26.335656310552388,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        10.973769801913232,
+        9.337915283139239,
+        -16.741814223204084
+      ],
+      "tilt_deg": 9.55047445984199
+    }
+  },
+  {
+    "scenario": "pos_xy_+5_-5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35624999932018164,
+      -0.08624999366719635,
+      0.01996285720465908
+    ],
+    "pose_used_for_grasp": [
+      0.3562499993405829,
+      -0.08624999743279672,
+      0.01996277605436336
+    ],
+    "perception_error": [
+      2.040123625590695e-08,
+      -3.765600373184519e-06
+    ],
+    "offset_xy_mm": [
+      5.0,
+      -5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.4992094538142795,
+    "tilt_after_close": 2.2714243402394643,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.39620937914531,
+        9.017805260619395,
+        -16.656211466003228
+      ],
+      "tilt_deg": 9.743935026176228
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.02740753221914,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.4992094538142795,
+    "close_tilt_deg": 2.2714243402394643,
+    "release_position_error_mm": 17.02740753221914,
+    "final_position_error_mm": 31.9675795001143,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.39620937914531,
+        9.017805260619395,
+        -16.656211466003228
+      ],
+      "tilt_deg": 9.743935026176228
+    }
+  },
+  {
+    "scenario": "pos_xy_+5_+10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3562500000685579,
+      -0.07125000005608974,
+      0.01996274236258735
+    ],
+    "pose_used_for_grasp": [
+      0.3562499980662119,
+      -0.07124999569833206,
+      0.019962686113678168
+    ],
+    "perception_error": [
+      -2.0023460112206237e-06,
+      4.357757682482699e-06
+    ],
+    "offset_xy_mm": [
+      5.0,
+      10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.6355406707849167,
+    "tilt_after_close": 2.220932809754441,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        10.927145212375956,
+        9.296458562687365,
+        -16.7370977401455
+      ],
+      "tilt_deg": 9.490408607324227
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.112191259156866,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.6355406707849167,
+    "close_tilt_deg": 2.220932809754441,
+    "release_position_error_mm": 17.112191259156866,
+    "final_position_error_mm": 25.98434908390592,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        10.927145212375956,
+        9.296458562687365,
+        -16.7370977401455
+      ],
+      "tilt_deg": 9.490408607324227
+    }
+  },
+  {
+    "scenario": "pos_xy_+5_-10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.35625000501768606,
+      -0.09125018725735706,
+      0.01996307508939412
+    ],
+    "pose_used_for_grasp": [
+      0.3562500045968505,
+      -0.09125025210283422,
+      0.019962851153435556
+    ],
+    "perception_error": [
+      -4.208355330881375e-07,
+      -6.484547715457367e-05
+    ],
+    "offset_xy_mm": [
+      5.0,
+      -10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 1.4512388850568714,
+    "tilt_after_close": 3.1265530322427284,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        12.310515822025375,
+        8.314174078103626,
+        -16.239542298746656
+      ],
+      "tilt_deg": 9.44945449063782
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 15.890241949737797,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 1.4512388850568714,
+    "close_tilt_deg": 3.1265530322427284,
+    "release_position_error_mm": 15.890241949737797,
+    "final_position_error_mm": 45.99772916986769,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        12.310515822025375,
+        8.314174078103626,
+        -16.239542298746656
+      ],
+      "tilt_deg": 9.44945449063782
+    }
+  },
+  {
+    "scenario": "pos_xy_-5_+5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.34625000111344045,
+      -0.07625000119898069,
+      0.019962809975258577
+    ],
+    "pose_used_for_grasp": [
+      0.34624999888952873,
+      -0.07624999753265385,
+      0.019962741894354347
+    ],
+    "perception_error": [
+      -2.223911721443983e-06,
+      3.6663268393466453e-06
+    ],
+    "offset_xy_mm": [
+      -5.0,
+      5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.598111877985265,
+    "tilt_after_close": 2.0918137087337665,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.588856611209396,
+        8.508563422401805,
+        -16.729151474409047
+      ],
+      "tilt_deg": 8.961764122088237
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.641340909819093,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.598111877985265,
+    "close_tilt_deg": 2.0918137087337665,
+    "release_position_error_mm": 16.641340909819093,
+    "final_position_error_mm": 22.52272692059529,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.588856611209396,
+        8.508563422401805,
+        -16.729151474409047
+      ],
+      "tilt_deg": 8.961764122088237
+    }
+  },
+  {
+    "scenario": "pos_xy_-5_-5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3462499999288957,
+      -0.08624999712434164,
+      0.019962642814081156
+    ],
+    "pose_used_for_grasp": [
+      0.34624999624509606,
+      -0.08624999812795041,
+      0.01996269268297484
+    ],
+    "perception_error": [
+      -3.6837996542082863e-06,
+      -1.0036087655374004e-06
+    ],
+    "offset_xy_mm": [
+      -5.0,
+      -5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": null,
+    "tilt_after_close": null,
+    "grasp_success": false,
+    "lift_success": false,
+    "T_gripper_object": null,
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": null,
+    "failure_reason": "APPROACH_MISALIGNMENT",
+    "stage_flags": [
+      "GRASP_FAIL",
+      "LIFT_FAIL",
+      "PLACEMENT_SKIP",
+      "RETREAT_SKIP"
+    ],
+    "success": false,
+    "close_shove_xy_mm": null,
+    "close_tilt_deg": null,
+    "release_position_error_mm": null,
+    "final_position_error_mm": null,
+    "T_gripper_queen_lift": null
+  },
+  {
+    "scenario": "pos_xy_-5_+10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.34625000099458225,
+      -0.0712499991247155,
+      0.01996294342230975
+    ],
+    "pose_used_for_grasp": [
+      0.3462499986146469,
+      -0.07124999813501055,
+      0.019963042746803633
+    ],
+    "perception_error": [
+      -2.379935359897445e-06,
+      9.897049429996585e-07
+    ],
+    "offset_xy_mm": [
+      -5.0,
+      10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 3.116817484643411,
+    "tilt_after_close": 1.6596622220007495,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.181179874547423,
+        8.819106827635101,
+        -16.625912245494902
+      ],
+      "tilt_deg": 8.401939391003927
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.34890073598098,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 3.116817484643411,
+    "close_tilt_deg": 1.6596622220007495,
+    "release_position_error_mm": 17.34890073598098,
+    "final_position_error_mm": 27.554145719846893,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.181179874547423,
+        8.819106827635101,
+        -16.625912245494902
+      ],
+      "tilt_deg": 8.401939391003927
+    }
+  },
+  {
+    "scenario": "pos_xy_-5_-10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3462499981422138,
+      -0.09125018437122989,
+      0.019963519112006205
+    ],
+    "pose_used_for_grasp": [
+      0.34624999924482036,
+      -0.09125024060639261,
+      0.01996347448608369
+    ],
+    "perception_error": [
+      1.1026065616093206e-06,
+      -5.6235162720907894e-05
+    ],
+    "offset_xy_mm": [
+      -5.0,
+      -10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.4297767821532665,
+    "tilt_after_close": 2.459403808956155,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        12.225384221294428,
+        8.134992082025066,
+        -16.652029162719177
+      ],
+      "tilt_deg": 8.995929095651649
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.91850867309622,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.4297767821532665,
+    "close_tilt_deg": 2.459403808956155,
+    "release_position_error_mm": 17.91850867309622,
+    "final_position_error_mm": 26.954488122050112,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        12.225384221294428,
+        8.134992082025066,
+        -16.652029162719177
+      ],
+      "tilt_deg": 8.995929095651649
+    }
+  },
+  {
+    "scenario": "pos_xy_+10_+5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.36124999976546696,
+      -0.0762499990106806,
+      0.019962727555666946
+    ],
+    "pose_used_for_grasp": [
+      0.361249997238575,
+      -0.07624999441347578,
+      0.01996265700166022
+    ],
+    "perception_error": [
+      -2.526891973442247e-06,
+      4.597204811274125e-06
+    ],
+    "offset_xy_mm": [
+      10.0,
+      5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.8215580973567542,
+    "tilt_after_close": 2.3787740565167916,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        10.751393428168813,
+        9.519062611995327,
+        -16.83723786875959
+      ],
+      "tilt_deg": 9.807350195314624
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.92864910805226,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.8215580973567542,
+    "close_tilt_deg": 2.3787740565167916,
+    "release_position_error_mm": 16.92864910805226,
+    "final_position_error_mm": 29.0744796442109,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        10.751393428168813,
+        9.519062611995327,
+        -16.83723786875959
+      ],
+      "tilt_deg": 9.807350195314624
+    }
+  },
+  {
+    "scenario": "pos_xy_+10_-5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3612499983984647,
+      -0.08624999847190147,
+      0.019962828191110598
+    ],
+    "pose_used_for_grasp": [
+      0.3612499958232493,
+      -0.08624999903641666,
+      0.019962927335280038
+    ],
+    "perception_error": [
+      -2.575215429789779e-06,
+      -5.645151845978802e-07
+    ],
+    "offset_xy_mm": [
+      10.0,
+      -5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.525178295612088,
+    "tilt_after_close": 2.5908029916072097,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.043578395958761,
+        9.45951944606434,
+        -16.75440189262284
+      ],
+      "tilt_deg": 10.084079369976156
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.373832371007286,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.525178295612088,
+    "close_tilt_deg": 2.5908029916072097,
+    "release_position_error_mm": 17.373832371007286,
+    "final_position_error_mm": 25.28893048531133,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.043578395958761,
+        9.45951944606434,
+        -16.75440189262284
+      ],
+      "tilt_deg": 10.084079369976156
+    }
+  },
+  {
+    "scenario": "pos_xy_+10_+10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3612499987434882,
+      -0.07124999789343307,
+      0.019963084612476215
+    ],
+    "pose_used_for_grasp": [
+      0.3612500004133751,
+      -0.07124999866104707,
+      0.01996313180111727
+    ],
+    "perception_error": [
+      1.669886950939059e-06,
+      -7.676140001411369e-07
+    ],
+    "offset_xy_mm": [
+      10.0,
+      10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.229066500499059,
+    "tilt_after_close": 2.300354130333961,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        10.869587090870846,
+        9.520792709916638,
+        -16.794796223494306
+      ],
+      "tilt_deg": 9.668690897927094
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.716359932436266,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.229066500499059,
+    "close_tilt_deg": 2.300354130333961,
+    "release_position_error_mm": 16.716359932436266,
+    "final_position_error_mm": 26.894762373188552,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        10.869587090870846,
+        9.520792709916638,
+        -16.794796223494306
+      ],
+      "tilt_deg": 9.668690897927094
+    }
+  },
+  {
+    "scenario": "pos_xy_+10_-10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3612499995043594,
+      -0.09125018351912066,
+      0.019962901879136994
+    ],
+    "pose_used_for_grasp": [
+      0.3612500026366424,
+      -0.09125024837123095,
+      0.019963003509182276
+    ],
+    "perception_error": [
+      3.1322830440494442e-06,
+      -6.48521102930566e-05
+    ],
+    "offset_xy_mm": [
+      10.0,
+      -10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.672001797413402,
+    "tilt_after_close": 2.3833554967443633,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.239298591506532,
+        9.734728716111388,
+        -16.8349160783467
+      ],
+      "tilt_deg": 9.315174745082437
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.6100094868388,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.672001797413402,
+    "close_tilt_deg": 2.3833554967443633,
+    "release_position_error_mm": 17.6100094868388,
+    "final_position_error_mm": 23.41128247281502,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.239298591506532,
+        9.734728716111388,
+        -16.8349160783467
+      ],
+      "tilt_deg": 9.315174745082437
+    }
+  },
+  {
+    "scenario": "pos_xy_-10_+5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.34124999667286043,
+      -0.07624999718049803,
+      0.01996266488863909
+    ],
+    "pose_used_for_grasp": [
+      0.3412499947216687,
+      -0.07624999136606143,
+      0.01996263040348538
+    ],
+    "perception_error": [
+      -1.9511917082049024e-06,
+      5.81443659886105e-06
+    ],
+    "offset_xy_mm": [
+      -10.0,
+      5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.186863598944609,
+    "tilt_after_close": 1.2189866717474545,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        11.80517506790933,
+        8.265026271015875,
+        -16.69795798832852
+      ],
+      "tilt_deg": 8.563009609101739
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.56498205966411,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.186863598944609,
+    "close_tilt_deg": 1.2189866717474545,
+    "release_position_error_mm": 16.56498205966411,
+    "final_position_error_mm": 23.333738755104747,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        11.80517506790933,
+        8.265026271015875,
+        -16.69795798832852
+      ],
+      "tilt_deg": 8.563009609101739
+    }
+  },
+  {
+    "scenario": "pos_xy_-10_-5mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.34125000088059676,
+      -0.08624999985645655,
+      0.019963072053245903
+    ],
+    "pose_used_for_grasp": [
+      0.34124999991792,
+      -0.08625000224574976,
+      0.019963119895710844
+    ],
+    "perception_error": [
+      -9.626767716319762e-07,
+      -2.3892932077274054e-06
+    ],
+    "offset_xy_mm": [
+      -10.0,
+      -5.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.492163589203039,
+    "tilt_after_close": 2.360484444940938,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        12.112507090297216,
+        7.972478813570921,
+        -16.68616264584568
+      ],
+      "tilt_deg": 8.936148852450978
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 17.05891542213587,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 2.492163589203039,
+    "close_tilt_deg": 2.360484444940938,
+    "release_position_error_mm": 17.05891542213587,
+    "final_position_error_mm": 29.33967144554977,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        12.112507090297216,
+        7.972478813570921,
+        -16.68616264584568
+      ],
+      "tilt_deg": 8.936148852450978
+    }
+  },
+  {
+    "scenario": "pos_xy_-10_+10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3412500003603488,
+      -0.07124999910427265,
+      0.019963093956900498
+    ],
+    "pose_used_for_grasp": [
+      0.3412499986618604,
+      -0.07124999694392783,
+      0.019963076812123882
+    ],
+    "perception_error": [
+      -1.6984884054771499e-06,
+      2.1603448197016206e-06
+    ],
+    "offset_xy_mm": [
+      -10.0,
+      10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 7.601181152961624,
+    "tilt_after_close": 1.9590062101086236,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        9.865876765996935,
+        9.908217308208577,
+        -17.000976945212113
+      ],
+      "tilt_deg": 7.475718826176757
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.59936187693139,
+    "failure_reason": null,
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_PASS",
+      "RETREAT_PASS"
+    ],
+    "success": true,
+    "close_shove_xy_mm": 7.601181152961624,
+    "close_tilt_deg": 1.9590062101086236,
+    "release_position_error_mm": 16.59936187693139,
+    "final_position_error_mm": 22.060123243663966,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        9.865876765996935,
+        9.908217308208577,
+        -17.000976945212113
+      ],
+      "tilt_deg": 7.475718826176757
+    }
+  },
+  {
+    "scenario": "pos_xy_-10_-10mm",
+    "seed": 0,
+    "target_id": "queen",
+    "source": "d1",
+    "destination": "d4",
+    "actual_start_pose": [
+      0.3412500012896923,
+      -0.09125018186229188,
+      0.019963394008446537
+    ],
+    "pose_used_for_grasp": [
+      0.34124999761062663,
+      -0.09125024053989043,
+      0.01996340001247595
+    ],
+    "perception_error": [
+      -3.6790656632312846e-06,
+      -5.86775985578214e-05
+    ],
+    "offset_xy_mm": [
+      -10.0,
+      -10.0
+    ],
+    "pose_error_xy_mm": [
+      0.0,
+      0.0
+    ],
+    "close_shove": 2.5646068956418913,
+    "tilt_after_close": 2.3258732168627114,
+    "grasp_success": true,
+    "lift_success": true,
+    "T_gripper_object": {
+      "p_ee_mm": [
+        12.488220986484254,
+        7.675104531887003,
+        -16.372798684934086
+      ],
+      "tilt_deg": 8.864415060708197
+    },
+    "neighbor_contact": false,
+    "neighbor_displacement": null,
+    "placement_error": 16.06409428820815,
+    "failure_reason": "RETREAT_COLLISION",
+    "stage_flags": [
+      "GRASP_PASS",
+      "LIFT_PASS",
+      "PLACEMENT_FAIL",
+      "RETREAT_FAIL"
+    ],
+    "success": false,
+    "close_shove_xy_mm": 2.5646068956418913,
+    "close_tilt_deg": 2.3258732168627114,
+    "release_position_error_mm": 16.06409428820815,
+    "final_position_error_mm": 39.698246588978286,
+    "T_gripper_queen_lift": {
+      "p_ee_mm": [
+        12.488220986484254,
+        7.675104531887003,
+        -16.372798684934086
+      ],
+      "tilt_deg": 8.864415060708197
+    }
+  }
+]

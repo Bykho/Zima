@@ -31,7 +31,8 @@ SPECS: dict[str, tuple[str, float, float]] = {
 }
 
 WHITE = [0.95, 0.95, 0.92, 1.0]
-BLACK = [0.08, 0.08, 0.10, 1.0]
+GREEN = [0.12, 0.78, 0.22, 1.0]  # dark side — black vanishes in RGB-D
+BLACK = GREEN
 
 
 def parse_fen(fen: str) -> dict[str, tuple[str, str]]:
@@ -74,7 +75,7 @@ def _make_shape(piece_type: str):
 def spawn_piece(square: str, color: str, piece_type: str, cfg: dict, *, settle: bool = True) -> int:
     col, vis, height = _make_shape(piece_type)
     pos = square_to_world(square, cfg, z=piece_center_z(cfg, piece_type))
-    rgba = WHITE if color == "white" else BLACK
+    rgba = WHITE if color == "white" else GREEN
     orn = [0, 0, 0, 1]
     if piece_type == "knight":
         orn = p.getQuaternionFromEuler([0, 0, 0.35])

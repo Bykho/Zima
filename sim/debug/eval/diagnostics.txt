@@ -1,0 +1,50 @@
+COMPENSATION: [3.76, 8.66] mm
+PROBE: 13/13  robust_radius=4 mm
+PROBE BASELINE SHOVE: 6.685505367350223
+
+DIAGNOSTIC MAP:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    G    G    C    C    C    C    C    C    C
+  +6    G    G    Y    C    C    C    C    C    C
+  +4    G    G    Y    Y    Y    C    C    Y    C
+  +2    G    G    Y    Y    Y    Y    Y    Y    Y
+  +0    G    Y    Y    Y    Y    Y    Y    Y    Y
+  -2    G    Y    Y    Y    Y    Y    Y    Y    Y
+  -4    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -6    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -8    Y    Y    Y    Y    Y    Y    Y    Y    Y
+Y=lift  G=GRASP_MISS  C=APPROACH_COLLISION  T=APPROACH_TRACK_FAIL  N=IK_NO_SOLUTION
+counts: C=16, G=10, Y=55
+
+APPROACH REACHABILITY:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    R    R    C    C    C    C    C    C    C
+  +6    R    R    R    C    C    C    C    C    C
+  +4    R    R    R    R    R    C    C    T    C
+  +2    R    R    R    R    R    R    R    R    R
+  +0    R    R    R    R    R    R    R    R    R
+  -2    R    R    R    R    R    R    R    R    R
+  -4    R    R    R    R    R    R    R    R    R
+  -6    R    R    R    R    R    R    R    R    R
+  -8    R    R    R    R    R    R    R    R    R
+R=clean approach  C=APPROACH_COLLISION  T=APPROACH_TRACK_FAIL  N=IK_NO_SOLUTION
+
+GRASP | CLEAN APPROACH:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    n    n    .    .    .    .    .    .    .
+  +6    n    n    Y    .    .    .    .    .    .
+  +4    n    n    Y    Y    Y    .    .    .    .
+  +2    n    n    Y    Y    Y    Y    Y    Y    Y
+  +0    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -2    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -4    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -6    Y    Y    Y    Y    Y    Y    Y    Y    Y
+  -8    Y    Y    Y    Y    Y    Y    Y    Y    Y
+(Y/n only where approach was clean; 54/64 lifts | . = not reachable cleanly)
+
+episode reasons: {'SUCCESS': 26, 'TRANSPORT_DROP': 5, 'GRASP_MISS': 10, 'RETREAT_COLLISION': 10, 'APPROACH_COLLISION': 16, 'PLACEMENT_POSITION_ERROR': 12, 'RELEASE_FAILURE': 2}
+lift-fail reasons: {'GRASP_MISS': 10, 'APPROACH_COLLISION': 16}
+IK_NO_SOLUTION count: 0
+APPROACH_TRACK_FAIL count: 0
+APPROACH_COLLISION count: 16
+GRASP_MISS count: 10

@@ -49,6 +49,62 @@ def square_to_world(square: str, cfg: dict, z: float | None = None) -> list[floa
     return [x, y, height]
 
 
+def corner_xy(cfg: dict) -> dict[str, tuple[float, float]]:
+    """Outer board corners in world XY — a1 is the origin corner."""
+    board = cfg.get("sim", {}).get("board", {})
+    origin = board.get("origin", [0.22, -0.10, 0.0])
+    size = float(board.get("square_size", 0.0375))
+    yaw = float(board.get("yaw", 0.0))
+    span = 8.0 * size
+    c, s = math.cos(yaw), math.sin(yaw)
+
+    def rot(lx: float, ly: float) -> tuple[float, float]:
+        return origin[0] + c * lx - s * ly, origin[1] + s * lx + c * ly
+
+    return {"a1": rot(0.0, 0.0), "h1": rot(span, 0.0), "a8": rot(0.0, span), "h8": rot(span, span)}
+
+
+def corner_world(cfg: dict, z: float | None = None) -> dict[str, list[float]]:
+    board = cfg.get("sim", {}).get("board", {})
+    height = float(board.get("surface_z", 0.02) if z is None else z)
+    return {name: [xy[0], xy[1], height] for name, xy in corner_xy(cfg).items()}
+
+
+def apply_board_pose(cfg: dict, origin_xy, yaw: float, square_size: float | None = None) -> None:
+    """Make square_to_world / reach use a measured board frame."""
+    board = cfg.setdefault("sim", {}).setdefault("board", {})
+    z = float(board.get("origin", [0.22, -0.10, 0.0])[2]) if board.get("origin") else 0.0
+    board["origin"] = [float(origin_xy[0]), float(origin_xy[1]), z]
+    board["yaw"] = float(yaw)
+    if square_size is not None:
+        board["square_size"] = float(square_size)
+
+
+def add_table(cfg: dict) -> int:
+    """Collision slab whose top is board surface_z — pieces were falling through the visual-only squares onto the ground plane."""
+    board = cfg.get("sim", {}).get("board", {})
+    origin = board.get("origin", [0.22, -0.10, 0.0])
+    size = float(board.get("square_size", 0.0375))
+    yaw = float(board.get("yaw", 0.0))
+    surface = float(board.get("surface_z", 0.02))
+    span = 8.0 * size
+    margin = 0.04
+    thick = 0.02
+    half = [span / 2 + margin, span / 2 + margin, thick / 2]
+    col = p.createCollisionShape(p.GEOM_BOX, halfExtents=half)
+    vis = p.createVisualShape(p.GEOM_BOX, halfExtents=half, rgbaColor=[0.18, 0.16, 0.14, 1.0])
+    cx = origin[0] + span / 2
+    cy = origin[1] + span / 2
+    cz = surface - thick / 2
+    return p.createMultiBody(
+        baseMass=0,
+        baseCollisionShapeIndex=col,
+        baseVisualShapeIndex=vis,
+        basePosition=[cx, cy, cz],
+        baseOrientation=p.getQuaternionFromEuler([0, 0, yaw]),
+    )
+
+
 def add_checkerboard(cfg: dict) -> list[int]:
     """Colored 8x8 squares (visual only, no collision)."""
     board = cfg.get("sim", {}).get("board", {})
@@ -79,15 +135,27 @@ def add_checkerboard(cfg: dict) -> list[int]:
     return ids
 
 
-def add_board_visuals(cfg: dict) -> list[int]:
-    """Checker squares + optional grid lines."""
+def add_corner_markers(cfg: dict) -> list[int]:
+    """Red spheres on the four outer corners — wrist-cam fiducials for board pose."""
     board = cfg.get("sim", {}).get("board", {})
+    radius = float(board.get("marker_radius", 0.012))
+    rgba = list(board.get("marker_rgba", [0.95, 0.05, 0.05, 1.0]))
+    vis = p.createVisualShape(p.GEOM_SPHERE, radius=radius, rgbaColor=rgba)
     ids = []
-    if board.get("show_checker", True):
-        ids.extend(add_checkerboard(cfg))
-    if not board.get("show_grid", True):
-        return ids
+    for pos in corner_world(cfg).values():
+        ids.append(
+            p.createMultiBody(
+                baseMass=0,
+                baseCollisionShapeIndex=-1,
+                baseVisualShapeIndex=vis,
+                basePosition=[pos[0], pos[1], pos[2] + radius],
+            )
+        )
+    return ids
 
+
+def add_grid_lines(cfg: dict) -> list[int]:
+    board = cfg.get("sim", {}).get("board", {})
     origin = board.get("origin", [0.22, -0.10, 0.0])
     size = board.get("square_size", 0.0375)
     yaw = board.get("yaw", 0.0)
@@ -107,6 +175,19 @@ def add_board_visuals(cfg: dict) -> list[int]:
         x0, y0 = rot(0, t)
         x1, y1 = rot(span, t)
         ids.append(p.addUserDebugLine([x0, y0, z], [x1, y1, z], [0.2, 0.2, 0.2], 1.5, 0))
+    return ids
+
+
+def add_board_visuals(cfg: dict) -> list[int]:
+    """Table collision + checker squares + red corner dots + optional grid lines."""
+    board = cfg.get("sim", {}).get("board", {})
+    ids = [add_table(cfg)]
+    if board.get("show_checker", True):
+        ids.extend(add_checkerboard(cfg))
+    if board.get("show_markers", True):
+        ids.extend(add_corner_markers(cfg))
+    if board.get("show_grid", True):
+        ids.extend(add_grid_lines(cfg))
     return ids
 
 

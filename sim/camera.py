@@ -34,6 +34,8 @@ class WristCamera:
         self.w = int(cam.get("width", 320))
         self.h = int(cam.get("height", 240))
         self.fov = float(cam.get("fov", 75))
+        self.near = float(cam.get("near", 0.01))
+        self.far = float(cam.get("far", 1.0))
         self.hz = float(cam.get("preview_hz", 12))
         self._last = 0.0
 
@@ -62,16 +64,36 @@ class WristCamera:
             target = p.multiplyTransforms(apos, aorn, self.target_local, IDENT)[0]
         return list(eye), list(target)
 
-    def capture(self) -> np.ndarray | None:
+    def capture_rgbd(self, target: list[float] | None = None, up: list[float] | None = None) -> dict | None:
+        """RGB, depth buffer, segmentation, and the matrices needed to unproject."""
         if not p.isConnected():
             return None
-        eye, target = self.eye_target_world()
-        view = p.computeViewMatrix(eye, target, self._camera_up())
-        proj = p.computeProjectionMatrixFOV(self.fov, self.w / self.h, 0.01, 1.0)
-        _, _, rgb, _, _ = p.getCameraImage(
+        eye, default_target = self.eye_target_world()
+        target = list(target) if target is not None else default_target
+        up = list(up) if up is not None else self._camera_up()
+        view = p.computeViewMatrix(eye, target, up)
+        proj = p.computeProjectionMatrixFOV(self.fov, self.w / self.h, self.near, self.far)
+        _, _, rgb, depth, seg = p.getCameraImage(
             self.w, self.h, view, proj, renderer=p.ER_TINY_RENDERER
         )
-        return np.array(rgb, dtype=np.uint8).reshape(self.h, self.w, 4)[:, :, :3]
+        rgb = np.array(rgb, dtype=np.uint8).reshape(self.h, self.w, 4)[:, :, :3]
+        depth = np.array(depth, dtype=np.float32).reshape(self.h, self.w)
+        seg = np.array(seg, dtype=np.int32).reshape(self.h, self.w)
+        return {
+            "rgb": rgb,
+            "depth": depth,
+            "seg": seg,
+            "view": view,
+            "proj": proj,
+            "near": self.near,
+            "far": self.far,
+            "eye": eye,
+            "target": target,
+        }
+
+    def capture(self) -> np.ndarray | None:
+        shot = self.capture_rgbd()
+        return None if shot is None else shot["rgb"]
 
     def show(self) -> bool:
         if not p.isConnected():

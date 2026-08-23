@@ -160,11 +160,13 @@ def test_fen_spawn():
 
 
 def test_e2e4_move():
+    from board import add_board_visuals
     from pieces import BoardPieces
     from pick import execute_move, piece_near_square
 
     cfg = load_config()
     a = arm()
+    add_board_visuals(cfg)
     a.reset_pose(cfg["poses"]["above_board"])
     pieces = BoardPieces(cfg=cfg)
     pieces.add("e2", "white", "pawn")
@@ -194,6 +196,99 @@ def test_wrist_camera_aim():
     return check("wrist camera aim", ok, f"yellow={yellow:.1%} std={rgb.std():.1f}")
 
 
+def test_board_pose_fit():
+    import numpy as np
+    from board_pose import expected_marker_xyz, fit_pose
+
+    cfg = load_config()
+    expected = expected_marker_xyz(cfg)
+    pts = np.array([expected[n] for n in ("a1", "h1", "a8", "h8")])
+    pose = fit_pose(pts, cfg)
+    origin = cfg["sim"]["board"]["origin"]
+    dxy = ((pose.origin[0] - origin[0]) ** 2 + (pose.origin[1] - origin[1]) ** 2) ** 0.5
+    dyaw = abs(pose.yaw - float(cfg["sim"]["board"].get("yaw", 0.0)))
+    dsize = abs(pose.square_size - float(cfg["sim"]["board"]["square_size"]))
+    ok = dxy < 0.003 and dyaw < 0.02 and dsize < 0.002
+    return check("board pose fit", ok, f"dxy={dxy:.4f} dyaw={dyaw:.4f} dsize={dsize:.4f}")
+
+
+def test_locate_board():
+    from board import add_board_visuals
+    from board_pose import locate
+    from camera import WristCamera
+    from pieces import START_FEN, BoardPieces
+
+    cfg = load_config()
+    prior = list(cfg["sim"]["board"]["origin"])
+    prior_yaw = float(cfg["sim"]["board"].get("yaw", 0.0))
+    prior_size = float(cfg["sim"]["board"]["square_size"])
+    a = arm()
+    add_board_visuals(cfg)
+    BoardPieces.from_fen(cfg, START_FEN)
+    a.reset_pose(cfg["poses"]["above_board"])
+    cam = WristCamera(a, cfg)
+    try:
+        pose = locate(a, cam, cfg)
+    except ValueError as e:
+        a.disconnect()
+        return check("locate board from red dots", False, str(e))
+    a.disconnect()
+    dxy = ((pose.origin[0] - prior[0]) ** 2 + (pose.origin[1] - prior[1]) ** 2) ** 0.5
+    dyaw = abs(pose.yaw - prior_yaw)
+    dsize = abs(pose.square_size - prior_size)
+    ok = pose.n_views >= 1 and dxy < 0.02 and dyaw < 0.12 and dsize < 0.004
+    return check(
+        "locate board from red dots",
+        ok,
+        f"views={pose.n_views} dxy={dxy:.3f} dyaw={dyaw:.3f} dsize={dsize:.4f}",
+    )
+
+
+def test_board_voxels():
+    import numpy as np
+    from board import add_board_visuals
+    from board_pose import locate
+    from camera import WristCamera
+    from pieces import START_FEN, BoardPieces
+    from voxels import scan, table_z_board, voxelize
+
+    # synthetic: a block on e2 in board frame
+    cfg = load_config()
+    size = float(cfg["sim"]["board"]["square_size"])
+    rng = np.random.default_rng(0)
+    xs = 4.5 * size + rng.uniform(-0.008, 0.008, 80)
+    ys = 1.5 * size + rng.uniform(-0.008, 0.008, 80)
+    zs = 0.03 + rng.uniform(0.0, 0.02, 80)
+    local = np.stack([xs, ys, zs], axis=1)
+    cols = np.full((80, 3), 40, dtype=np.uint8)
+    occ, _ = voxelize(local, cols, 0.004, 8 * size, 0.02, 0.07)
+    ok_synth = int(occ.sum()) > 5
+    check("voxelize synthetic e2", ok_synth, f"occ={int(occ.sum())}")
+
+    a = arm()
+    add_board_visuals(cfg)
+    BoardPieces.from_fen(cfg, START_FEN)
+    a.reset_pose(cfg["poses"]["above_board"])
+    cam = WristCamera(a, cfg)
+    try:
+        pose = locate(a, cam, cfg)
+        grid = scan(a, cam, cfg, pose)
+    except ValueError as e:
+        a.disconnect()
+        return check("board voxel scan", False, str(e))
+    a.disconnect()
+    z_clear = table_z_board(pose, cfg) + float(cfg.get("sim", {}).get("voxels", {}).get("z_clear", 0.008))
+    occ8 = grid.occupancy_8x8(z_clear)
+    back = int(occ8[:, 0:2].sum() + occ8[:, 6:8].sum())
+    mid = int(occ8[:, 2:6].sum())
+    ok = grid.n_views >= 3 and len(grid) > 80 and back >= 16 and mid <= 8
+    return check(
+        "board voxel scan",
+        ok,
+        f"views={grid.n_views} occ={len(grid)} shape={grid.shape} back={back} mid={mid}",
+    )
+
+
 def test_interpolate():
     a = {n: 0.0 for n in JOINT_NAMES}
     b = {n: 1.0 for n in JOINT_NAMES}
@@ -219,6 +314,9 @@ def main():
         test_interpolate(),
         test_board_reach(),
         test_wrist_camera_aim(),
+        test_board_pose_fit(),
+        test_locate_board(),
+        test_board_voxels(),
     ]
     if not FAST:
         results.append(test_fen_spawn())

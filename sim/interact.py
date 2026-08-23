@@ -21,6 +21,7 @@ Other:
   P            save pose
   [ / ]        prev / next named pose
   V            wrist camera (Q in that window to close)
+  C            red-dot board pose, then four-corner voxel scan
   Esc          quit
 """
 
@@ -32,7 +33,14 @@ import pybullet as p
 
 from arm import JOINT_NAMES, SimArm, load_config
 from board import add_board_visuals
+from board_pose import draw as draw_pose
+from board_pose import locate as locate_board
+from board_pose import render as render_pose
 from camera import WristCamera
+from voxels import draw as draw_voxels
+from voxels import render as render_voxels
+from voxels import scan as scan_voxels
+from voxels import table_z_board
 from controls import apply_fine_controls, apply_hold_controls, apply_key_event, gripper_is_open
 from pieces import START_FEN, BoardPieces
 from poses import list_poses
@@ -50,7 +58,7 @@ ARROWS = {
 def print_status(selected: int, step: float, targets: dict[str, float], actual: dict[str, float], pose_i: int, pose_names: list[str]):
     pose_label = pose_names[pose_i] if pose_names else "-"
     print(f"\n[{JOINT_NAMES[selected]}] step={step:.3f}  pose={pose_label}")
-    print("  A/D pan  I/K lift  W/S elbow  ↑↓ wrist  ←→ roll  Q/E grip  U/J fine  B board  Esc quit")
+    print("  A/D pan  I/K lift  W/S elbow  ↑↓ wrist  ←→ roll  Q/E grip  C voxels  V cam  Esc quit")
     for name in JOINT_NAMES:
         mark = ">" if name == JOINT_NAMES[selected] else " "
         print(f" {mark} {name:14s} target {targets[name]:+.3f}   actual {actual[name]:+.3f}")
@@ -129,6 +137,49 @@ def main():
                         WristCamera.close_window()
                     else:
                         print("  wrist camera on (Q in preview window to close)")
+                    moved = True
+                    continue
+                if key == ord("c"):
+                    prior = list(cfg.get("sim", {}).get("board", {}).get("origin", [0.22, -0.10, 0.0]))
+                    prior_yaw = float(cfg.get("sim", {}).get("board", {}).get("yaw", 0.0))
+                    print("  finding board from red corner dots…")
+                    try:
+                        board_pose = locate_board(arm, cam, cfg)
+                    except ValueError as e:
+                        print(f"  board pose failed: {e}")
+                        targets = {n: above.get(n, home.get(n, 0.0)) for n in JOINT_NAMES}
+                        gripper_open = targets["gripper"] > 0.4
+                        moved = True
+                        continue
+                    draw_pose(board_pose, cfg)
+                    render_pose(board_pose, cfg)
+                    print("  scanning four corners → board voxels…")
+                    grid = scan_voxels(arm, cam, cfg, board_pose)
+                    draw_voxels(grid)
+                    z_clear = table_z_board(board_pose, cfg) + float(
+                        cfg.get("sim", {}).get("voxels", {}).get("z_clear", 0.008)
+                    )
+                    occ8 = grid.occupancy_8x8(z_clear)
+                    render_voxels(grid, cfg)
+                    from world import look_at_board
+
+                    look_at_board(cfg)
+                    dyaw = abs(board_pose.yaw - prior_yaw)
+                    dxy = ((board_pose.origin[0] - prior[0]) ** 2 + (board_pose.origin[1] - prior[1]) ** 2) ** 0.5
+                    print(
+                        f"  board: origin ({board_pose.origin[0]:.3f}, {board_pose.origin[1]:.3f})  "
+                        f"yaw {board_pose.yaw * 180 / 3.14159:+.1f} deg  "
+                        f"square {board_pose.square_size * 1000:.1f} mm  "
+                        f"({board_pose.n_views} views)"
+                    )
+                    print(f"  vs yaml prior: {dxy * 1000:.1f} mm, {dyaw * 180 / 3.14159:.1f} deg")
+                    print(
+                        f"  voxels: {len(grid)} occupied  {grid.shape[0]}x{grid.shape[1]}x{grid.shape[2]}  "
+                        f"{int(occ8.sum())}/64 squares  {grid.n_views} views"
+                    )
+                    print("  sim/frames/board_pose.png  sim/frames/board_voxels.png")
+                    targets = {n: above.get(n, home.get(n, 0.0)) for n in JOINT_NAMES}
+                    gripper_open = targets["gripper"] > 0.4
                     moved = True
                     continue
                 if key == ord("p"):

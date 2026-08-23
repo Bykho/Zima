@@ -1,0 +1,5 @@
+neighbor_left_c1: target=LIFT neighbor_contact=False disp_mm=2.453772664885091e-05 tilt=0.005423598618633732 clearance_mm=96.62878494622935 flags=['GRASP_PASS', 'LIFT_PASS', 'PLACEMENT_PASS', 'RETREAT_PASS']
+neighbor_right_e1: target=LIFT neighbor_contact=False disp_mm=1.8292878084900998e-05 tilt=0.0057052703188953105 clearance_mm=120.0 flags=['GRASP_PASS', 'LIFT_PASS', 'PLACEMENT_PASS', 'RETREAT_PASS']
+neighbor_front_d2: target=LIFT neighbor_contact=False disp_mm=10.438122445675765 tilt=93.82862629460944 clearance_mm=98.83808105553479 flags=['GRASP_PASS', 'LIFT_PASS', 'PLACEMENT_FAIL', 'RETREAT_PASS']
+
+FIRST FAILURE MODE: neighbor_front_d2: target=LIFT neighbor_contact=False disp_mm=10.438122445675765 tilt=93.82862629460944 clearance_mm=98.83808105553479 flags=['GRASP_PASS', 'LIFT_PASS', 'PLACEMENT_FAIL', 'RETREAT_PASS']

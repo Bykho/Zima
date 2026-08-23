@@ -1,0 +1,8 @@
+transport_none: lift=PASS place=PASS retreat=PASS path=straight disp_mm=None tilt=None success=True reason=None
+transport_c1: lift=PASS place=PASS retreat=PASS path=straight disp_mm=2.4734802903647513e-05 tilt=0.0063118629956620785 success=True reason=None
+transport_e1: lift=PASS place=PASS retreat=PASS path=straight disp_mm=1.998449592223942e-05 tilt=0.007279266802784212 success=True reason=None
+transport_d2: lift=PASS place=PASS retreat=PASS path=clearance disp_mm=2.1267564711960907e-05 tilt=0.007801399574087356 success=True reason=None
+transport_c2: lift=PASS place=PASS retreat=PASS path=straight disp_mm=1.7385325174401332e-05 tilt=0.00564912099730133 success=True reason=None
+transport_e2: lift=PASS place=PASS retreat=PASS path=straight disp_mm=3.1207190418404556e-05 tilt=0.0029467196864002647 success=True reason=None
+
+FIRST FAILURE MODE: none — all transport cases completed with neighbors undisturbed

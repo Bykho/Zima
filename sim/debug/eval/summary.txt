@@ -1,0 +1,46 @@
+SCENARIO HARNESS FILES: sim/scenario.py sim/evaluate.py (run_pickup in sim/pickup.py)
+BASELINE RESULT: lift=PASS GRASP_PASS LIFT_PASS PLACEMENT_PASS RETREAT_PASS reason=None
+MAX X OFFSET WITH SUCCESS: +7 / -10 mm (any success); contiguous from 0: [-10, +7] mm
+MAX Y OFFSET WITH SUCCESS: +10 / -10 mm (any success); contiguous from 0: [-10, +10] mm
+2D OFFSET SUCCESS REGION:
+      -10   -7   -5   -3   -2   -1   +0   +1   +2   +3   +5   +7  +10
+ +10    Y    .    Y    .    .    .    Y    .    .    .    Y    .    Y
+  +7    .    .    .    .    .    .    Y    .    .    .    .    .    .
+  +5    Y    .    Y    .    .    .    Y    .    .    .    Y    .    Y
+  +3    .    .    .    .    .    .    Y    .    .    .    .    .    .
+  +2    .    .    .    .    .    .    Y    .    .    .    .    .    .
+  +1    .    .    .    .    .    .    Y    .    .    .    .    .    .
+  +0    Y    Y    Y    Y    Y    Y    Y    Y    Y    Y    Y    Y    n
+  -1    .    .    .    .    .    .    Y    .    .    .    .    .    .
+  -2    .    .    .    .    .    .    Y    .    .    .    .    .    .
+  -3    .    .    .    .    .    .    Y    .    .    .    .    .    .
+  -5    Y    .    n    .    .    .    Y    .    .    .    Y    .    Y
+  -7    .    .    .    .    .    .    Y    .    .    .    .    .    .
+ -10    Y    .    Y    .    .    .    Y    .    .    .    Y    .    Y
+(Y = lift success, n = lift fail, . = not run)
+MAX PERCEPTION X ERROR WITH SUCCESS: +6 / -4 mm (any success); contiguous from 0: [-4, +0] mm
+MAX PERCEPTION Y ERROR WITH SUCCESS: +0 / -8 mm (any success); contiguous from 0: [-8, +0] mm
+2D PERCEPTION-ERROR SUCCESS REGION:
+       -8   -6   -4   -2   +0   +2   +4   +6   +8
+  +8    n    n    n    n    n    n    n    n    n
+  +6    n    n    n    Y    n    n    n    n    n
+  +4    n    n    n    n    n    n    n    n    n
+  +2    n    n    Y    Y    n    n    n    n    n
+  +0    n    n    Y    Y    Y    n    n    Y    n
+  -2    n    n    Y    Y    Y    Y    Y    Y    Y
+  -4    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -6    n    Y    Y    Y    Y    Y    Y    Y    Y
+  -8    Y    Y    Y    Y    Y    Y    Y    Y    Y
+(Y = lift success, n = lift fail, . = not run)
+MEAN CLOSE SHOVE: 4.64 mm
+MAX CLOSE SHOVE: 16.99 mm
+MEAN TILT: 2.59 deg
+GRASP TRANSFORM VARIANCE: {"n": 21, "mean_mm": [11.590971067024217, 8.582306599210057, -16.64196325220004], "std_mm": [1.1825505425228546, 1.299988783097393, 0.15536188134550044], "rms_std_mm": 1.7642374942097088}
+CURRENT ~4 MM VISION ERROR ADEQUATE?: no — 8/13 cells with r<=4 mm lifted; failures: perc_+0_+2mm, perc_+0_+4mm, perc_+2_+0mm, perc_+2_+2mm, perc_+4_+0mm; max successful radial error 11.3 mm; current wrist error ~4 mm is not safely inside the envelope
+DOMINANT FAILURE MODE: IK_FAILURE (27/44 lift fails)
+
+lift success rate (all): 78/122 = 64%
+full episode success: 41/122
+failure_modes: {'SUCCESS': 41, 'RETREAT_COLLISION': 22, 'APPROACH_MISALIGNMENT': 7, 'TRANSPORT_DROP': 4, 'LIFT_DROP': 6, 'GRASP_MISS': 4, 'IK_FAILURE': 27, 'PLACEMENT_POSITION_ERROR': 10, 'RELEASE_FAILURE': 1}
+position_offsets lift: 39/41
+perception_error lift: 39/81

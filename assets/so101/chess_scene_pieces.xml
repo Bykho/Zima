@@ -1,0 +1,4 @@
+<mujoco model="so101_chess_pieces">
+  <include file="chess_scene.xml"/>
+  <include file="pieces.xml"/>
+</mujoco>

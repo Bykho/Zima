@@ -1,0 +1,107 @@
+STARTING-BOARD POPULATED STUDY
+Frozen: perception, camera, grasp compensation, aperture, transport, release.
+EPISODES: 64 (pickup GT 32, pickup vision 32, place 0)
+DESTINATIONS (place follow-up): d4, a4, e5
+
+PICKUP+LIFT GT:     20/32 (62%)
+PICKUP+LIFT VISION: 18/32 (56%)
+PLACE (among follow-ups): n/a
+FULL PLACE EPISODE: n/a
+
+STARTING PICKUP MAP — GT
+      a    b    c    d    e    f    g    h
+ 8   P    P    P    F    F    F    F    F 
+ 7   P    P    P    F    P    P    F    F 
+ 6   -    -    -    -    -    -    -    - 
+ 5   -    -    -    -    -    -    -    - 
+ 4   -    -    -    -    -    -    -    - 
+ 3   -    -    -    -    -    -    -    - 
+ 2   P    P    P    P    P    P    F    F 
+ 1   P    P    P    P    P    P    F    F 
+    (P=pickup+lift ok  F=fail  -=not run)
+
+STARTING PICKUP MAP — VISION
+      a    b    c    d    e    f    g    h
+ 8   P    P    P    F    F    F    F    F 
+ 7   F    P    P    F    P    P    F    F 
+ 6   -    -    -    -    -    -    -    - 
+ 5   -    -    -    -    -    -    -    - 
+ 4   -    -    -    -    -    -    -    - 
+ 3   -    -    -    -    -    -    -    - 
+ 2   P    P    P    P    P    P    F    F 
+ 1   P    P    P    P    P    F    F    F 
+    (P=pickup+lift ok  F=fail  -=not run)
+
+GT FAILURES:
+  queen   d8  NO_COLLISION_FREE_APPROACH
+  king    e8  NO_COLLISION_FREE_APPROACH
+  bishop  f8  NO_COLLISION_FREE_APPROACH
+  knight  g8  IK_NO_SOLUTION
+  rook    h8  IK_NO_SOLUTION
+  pawn    d7  APPROACH_COLLISION  obs=king@e8 proxy_e8
+  pawn    g7  IK_NO_SOLUTION
+  pawn    h7  IK_NO_SOLUTION
+  pawn    g2  NO_COLLISION_FREE_APPROACH
+  pawn    h2  IK_NO_SOLUTION
+  knight  g1  NO_COLLISION_FREE_APPROACH
+  rook    h1  IK_NO_SOLUTION
+
+VISION FAILURES:
+  queen   d8  NO_COLLISION_FREE_APPROACH
+  king    e8  NO_COLLISION_FREE_APPROACH
+  bishop  f8  NO_COLLISION_FREE_APPROACH
+  knight  g8  IK_NO_SOLUTION
+  rook    h8  IK_NO_SOLUTION
+  pawn    a7  LIFT_DROP
+  pawn    d7  LIFT_DROP  obs=queen@d8 jaw
+  pawn    g7  IK_NO_SOLUTION
+  pawn    h7  IK_NO_SOLUTION
+  pawn    g2  NO_COLLISION_FREE_APPROACH
+  pawn    h2  IK_NO_SOLUTION
+  bishop  f1  LIFT_DROP  obs=pawn@e2 jaw
+  knight  g1  NO_COLLISION_FREE_APPROACH
+  rook    h1  IK_NO_SOLUTION
+
+SUCCESS BY PIECE TYPE (GT pickup):
+  pawn     11/16
+  rook     2/4
+  bishop   3/4
+  knight   2/4
+  queen    1/2
+  king     1/2
+
+SUCCESS BY PIECE TYPE (vision pickup):
+  pawn     10/16
+  rook     2/4
+  bishop   2/4
+  knight   2/4
+  queen    1/2
+  king     1/2
+
+SUCCESS BY RANK (GT pickup):
+  rank 1  6/8
+  rank 2  6/8
+  rank 7  5/8
+  rank 8  3/8
+
+SUCCESS BY RANK (vision pickup):
+  rank 1  5/8
+  rank 2  6/8
+  rank 7  4/8
+  rank 8  3/8
+
+PICKUP FAILURE REASONS (GT+vision):
+  SUCCESS: 38
+  IK_NO_SOLUTION: 12
+  NO_COLLISION_FREE_APPROACH: 10
+  LIFT_DROP: 3
+  APPROACH_COLLISION: 1
+
+FAILED-PICKUP FIRST OBSTRUCTION (robot part):
+  none: 24
+  jaw: 2
+
+TOP 3 FAILURE MECHANISMS (all episodes):
+  1. IK_NO_SOLUTION (12)
+  2. NO_COLLISION_FREE_APPROACH (10)
+  3. LIFT_DROP (3)

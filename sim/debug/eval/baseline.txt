@@ -1,0 +1,11 @@
+compensation: [3.76, 8.66] mm
+verify: 4/4  (re-confirmed after diagnostic freeze)
+robust radius: 4 mm
+probe score: 13/13
+baseline shove: 6.6 mm
+worst successful shove: 10.7 mm
+worst successful tilt: 3.4 deg
+vision noisy samples in capture region: 17/17
+dominant remaining failure: APPROACH_COLLISION at large +Y
+IK_NO_SOLUTION on 8 mm perc grid: 0
+APPROACH_TRACK_FAIL on 8 mm perc grid: 0

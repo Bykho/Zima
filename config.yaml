@@ -1,10 +1,32 @@
 sim:
   urdf: assets/SO-ARM100/Simulation/SO101/so101_new_calib.urdf
+  mjcf: assets/so101/chess_scene.xml
   use_gui: true
   timestep: 0.004166666666666667
   gravity: -9.81
   arm_base_position: [0.0, 0.0, 0.0]
   motor_force: 200.0
+  pickup:
+    source: d1
+    dest: d4
+    observe_z: 0.12
+    pregrasp_z: 0.10
+    grasp_z: 0.015
+    lift_z: 0.08
+    place_hover: 0.003
+    release_lift_z: 0.08
+    place_xy_tol: 0.018
+    gripper_open: 0.45
+    gripper_closed: -0.12
+    close_steps: 220
+    lift_clearance: 0.04
+    # EE height above the board used only when the straight carry is blocked.
+    # Lift already reaches ~0.12 m world (~0.10 above the board); 0.08 is a
+    # floor that does not add extra raise on the d1→d4 d2-clearance path.
+    transport_clearance_z: 0.08
+    # Grasp EE offset from the believed object XY. Reduced Y vs 80% pinch
+    # travel ([3.76, 12.66]) so the open fixed jaw has a ~4 mm capture region.
+    grasp_xy_offset: [0.00376, 0.00866]
   board:
     origin: [0.22, -0.10, 0.0]
     square_size: 0.0375
@@ -15,6 +37,9 @@ sim:
     ee_rpy: [3.14159, 0.0, 0.0]
     show_grid: true
     show_checker: true
+    show_markers: true
+    marker_radius: 0.012
+    marker_rgba: [0.95, 0.05, 0.05, 1.0]
     show_pieces: true
     start_fen: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR
     pick_hover: 0.09
@@ -33,7 +58,9 @@ sim:
     friction: 1.5
     timeout_s: 4.0
   camera:
-    # 32×32 mm wrist mount on wrist-roll housing (gripper_link frame)
+    # RealSense D405 on official SO-ARM Wrist_Roll_D405_Holder (so101.xml).
+    # Wrist RGB-D backend is sim/sensor.py → generic RgbdObservation.
+    # MuJoCo pose is the XML camera; these fields are unused by the MJCF path.
     mount_link: gripper_link
     aim_link: gripper_frame_link
     eye_xyz: [0.03, 0.05, -0.02]
@@ -46,6 +73,33 @@ sim:
     height: 240
     fov: 75
     preview_hz: 12
+    near: 0.01
+    far: 1.0
+  scan:
+    stride: 1
+    voxel: 0.003
+    far: 0.75
+    hover: 0.24
+    margin: 0.04
+    z_min: 0.015
+    z_max: 0.12
+    move_duration: 0.5
+    settle_steps: 8
+    squares: [a1, a8, h1, h8, e4]
+  locate:
+    hover: 0.28
+    squares: [e4, a1, a8, h1, h8]
+    move_duration: 0.5
+    settle_steps: 8
+    far: 0.85
+  voxels:
+    size: 0.004
+    z_clear: 0.008
+    z_max: 0.055
+    hover: 0.28
+    squares: [a1, a8, h1, h8]
+    stride: 1
+    far: 0.85
 
 joints:
   - shoulder_pan
@@ -79,6 +133,14 @@ poses:
     wrist_flex: -0.35
     wrist_roll: 0.0
     gripper: 0.8
+  # Seed from menagerie box-pickup: gripperframe +X already world-down.
+  vertical_seed:
+    shoulder_pan: 0.0
+    shoulder_lift: 0.0
+    elbow_flex: 0.47
+    wrist_flex: 1.18
+    wrist_roll: 1.58
+    gripper: 0.45
 
 real:
   port: null
