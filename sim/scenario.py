@@ -35,8 +35,9 @@ PIECES = {
         "height": 0.036,
         "width": 0.024,
         "stem_width": 0.016,
-        # rook_top underside (pos 0.032, half-height 0.004)
-        "preferred_grasp_height": _grasp_height(0.016, 0.028),
+        # Vertical-pinch height sweep (d-file, neighbors, ±2.5 mm xy): 5/5 from
+        # 4 to 16 mm, hole at 20 mm. Center of the basin, not the brim rule.
+        "preferred_grasp_height": _grasp_height(0.010),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.04,
     },
@@ -54,7 +55,8 @@ PIECES = {
         "height": 0.036,
         "width": 0.020,
         "stem_width": 0.014,
-        "preferred_grasp_height": _grasp_height(0.014),
+        # Sweep: 4/5 at 10-12 mm and 26 mm, 5/5 from 14 to 22 mm.
+        "preferred_grasp_height": _grasp_height(0.018),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.05,
     },
@@ -63,8 +65,10 @@ PIECES = {
         "height": 0.055,
         "width": 0.022,
         "stem_width": 0.009,
-        # queen_collar underside (pos 0.031, half-height 0.003)
-        "preferred_grasp_height": _grasp_height(0.015, 0.028),
+        # The brim rule put the fingertips on the top edge of the 8 mm base
+        # disk: a +2 mm descend error (vision) pinched the rim and dropped.
+        # Sweep: 3/5 at 10 mm, 5/5 from 12 to 24 mm (stem). Center of that.
+        "preferred_grasp_height": _grasp_height(0.016),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.12,
     },

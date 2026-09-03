@@ -160,7 +160,7 @@ def apply_approach_gripper(sim, hover_xyz, gripper: float) -> bool:
 # Grasp XY is frozen. No camera, no RRT. Wrist-roll + aperture only.
 APPROACH_BODIES = ("gripper", "moving_jaw_so101_v1", "camera_mount", "wrist")
 PALM_BODIES = ("gripper", "camera_mount", "wrist")
-_ROLL_DELTAS = (0.35, -0.35, 0.70, -0.70, 1.05, -1.05, 1.57, -1.57, 2.10, -2.10)
+_ROLL_GRID_RAD = 0.35
 _DESCEND_U = (0.30, 0.55, 0.80)
 _APPROACH_MARGIN = 0.0005
 # Kinematic 0.5 mm still physics-clips on locked-wrist +Z (palm vs neighbor).
@@ -454,6 +454,47 @@ def _pose_for_candidate(
     return False, lock
 
 
+_LEVEL_PADS_TILT_DEG = 8.0
+
+
+def _level_pads_roll(sim, grasp, base_roll: float) -> float:
+    """Roll that puts the pinch axis horizontal when a vertical pinch is out of reach.
+
+    On the g/h files the wrist cannot point straight down (18-30 deg tilt in
+    the arm's radial plane). If the pinch axis lies in that plane one pad
+    lands lower than the other and closing tips the piece 20-30 deg. Rolling
+    so gripper local Z is horizontal puts both pads at the same height; the
+    remaining tilt is along the pad width, which a cylinder does not mind.
+    Below the tilt threshold the natural roll is kept.
+    """
+    q = sim.qpos()
+    q["wrist_roll"] = float(base_roll)
+    sim.set_qpos(q, hold=True)
+    if not solve_ik_down(sim, grasp, lock_joints=("wrist_roll",)):
+        return base_roll
+    _, R = sim.site_pose("gripperframe")
+    tilt = float(np.degrees(np.arccos(np.clip(-R[2, 0], -1.0, 1.0))))
+    if tilt < _LEVEL_PADS_TILT_DEG:
+        return base_roll
+    y_z, z_z = float(R[2, 1]), float(R[2, 2])
+    if abs(y_z) < 1e-6 and abs(z_z) < 1e-6:
+        return base_roll
+    # Rolling by phi about local X: z(phi) = cos(phi) z0 + sin(phi) y0 (or the
+    # mirror, depending on joint sign). Test both and keep the level one.
+    best_roll, best_err = base_roll, abs(z_z)
+    for phi in (np.arctan2(-z_z, y_z), np.arctan2(z_z, -y_z), np.arctan2(-z_z, y_z) + np.pi, np.arctan2(z_z, -y_z) + np.pi):
+        cand = _clip_roll(sim, base_roll + float(phi))
+        q["wrist_roll"] = cand
+        sim.set_qpos(q, hold=True)
+        if not solve_ik_down(sim, grasp, lock_joints=("wrist_roll",)):
+            continue
+        _, Rc = sim.site_pose("gripperframe")
+        err = abs(float(Rc[2, 2]))
+        if err < best_err - 1e-3:
+            best_roll, best_err = cand, err
+    return float(best_roll)
+
+
 def _solve_path_point(sim, xyz, lock, vertical: bool) -> bool:
     if vertical:
         return solve_ik_down(sim, xyz, lock_joints=lock)
@@ -684,26 +725,37 @@ def plan_approach(
             base_roll = float(sim.qpos()["wrist_roll"])
             break
     restore()
+    level_roll = _level_pads_roll(sim, grasp, base_roll)
+    restore()
 
     # Roll is redundant for a vertical pinch, so a "free" roll drifts by up to
     # a radian between planning and the executed pre/descend, and the pinch
     # axis (hence the fixed-pad grasp offset) drifts with it. Always plan and
     # execute an explicit roll; the natural one is what position IK lands on.
-    roll_cands: list[tuple[int, float | None, float]] = [(0, base_roll, grippers[0])]
-    rank = 1
-    for g in grippers[1:]:
-        roll_cands.append((rank, base_roll, g))
-        rank += 1
-    for droll in _ROLL_DELTAS:
-        roll = _clip_roll(sim, base_roll + droll)
+    # Where the pinch cannot be vertical, the pad-leveling roll goes first.
+    # The natural roll is path dependent (it is whatever the observe pose left),
+    # so deltas around it made success depend on history. Scan an absolute
+    # grid over the joint range instead, ordered by distance from the natural
+    # roll; the pad-leveling roll goes first when the pinch cannot be vertical.
+    rolls: list[float] = []
+    if abs(level_roll - base_roll) > 0.1:
+        rolls.append(level_roll)
+    rolls.append(base_roll)
+    lo, hi = sim.joint_limits()["wrist_roll"]
+    grid = np.arange(lo + 0.05, hi - 0.05 + 1e-9, _ROLL_GRID_RAD)
+    for r in sorted(grid, key=lambda v: abs(float(v) - base_roll)):
+        r = float(r)
+        if all(abs(r - x) > 0.15 for x in rolls):
+            rolls.append(r)
+    roll_cands: list[tuple[int, float | None, float]] = []
+    rank = 0
+    for roll in rolls:
         for g in grippers:
             roll_cands.append((rank, roll, g))
             rank += 1
-    # Far pregrasp XY: free roll first, then only large rolls.
-    coarse_rolls = [_clip_roll(sim, base_roll + d) for d in (1.57, -1.57, 2.10, -2.10)]
-    offset_cands: list[tuple[int, float | None, float]] = [(rank, base_roll, g) for g in grippers]
-    rank += len(grippers)
-    for roll in coarse_rolls:
+    # Far pregrasp XY: every other grid roll.
+    offset_cands: list[tuple[int, float | None, float]] = []
+    for roll in rolls[::2]:
         for g in grippers:
             offset_cands.append((rank, roll, g))
             rank += 1
