@@ -588,6 +588,60 @@ def _carry_lin(
     )
 
 
+def _place_ee_target(sim: Sim, tid: str, dest_xy, z_ee: float, lock: tuple[str, ...]) -> list[float] | None:
+    """EE point at height z_ee that puts the held piece over dest_xy with gripper +X world-down.
+
+    piece = ee + R p_local, with p_local measured now (the pinch offset) and R
+    the vertical-gripper rotation at dest (solved, roll locked). Restores qpos.
+    """
+    gpos, grot = sim.site_pose(EE_SITE)
+    q, _ = sim.object_pose(tid)
+    p_local = grot.T @ (q - gpos)
+    snap = sim.qpos()
+    try:
+        ee = np.array([float(dest_xy[0]), float(dest_xy[1]), float(z_ee)])
+        for _ in range(2):
+            if not solve_ik_down(sim, ee, lock_joints=lock):
+                return None
+            _, R = sim.site_pose(EE_SITE)
+            off = R @ p_local
+            ee = np.array([float(dest_xy[0]) - off[0], float(dest_xy[1]) - off[1], float(z_ee)])
+        return [float(v) for v in ee]
+    finally:
+        sim.set_qpos(snap, hold=True)
+
+
+def _lower_vertical(sim: Sim, tid: str, dest_xy, place_z: float, hold: tuple[str, ...], result: dict) -> list[float] | None:
+    """Align the held piece over dest at the current height, then descend plumb."""
+    gpos, _ = sim.site_pose(EE_SITE)
+    align = _place_ee_target(sim, tid, dest_xy, float(gpos[2]), hold)
+    if align is not None:
+        if not move_lin(sim, align, duration=0.8, physics=True, n_wp=8, lock_joints=hold, down=True):
+            return None
+    else:
+        # Dest inside the near-base hole: a vertical wrist over it only exists
+        # low (r=100 mm: z<=0.04). Drop to skim height here on the ring, slide
+        # in plumb at that height, then finish the last few mm straight down.
+        skim_z = place_z + 0.005
+        down = [float(gpos[0]), float(gpos[1]), skim_z]
+        if not move_lin(sim, down, duration=0.8, physics=True, n_wp=8, lock_joints=hold, down=True):
+            return None
+        skim = _place_ee_target(sim, tid, dest_xy, skim_z, hold)
+        if skim is None:
+            return None
+        if not move_lin(sim, skim, duration=1.0, physics=True, n_wp=12, lock_joints=hold, down=True):
+            return None
+        result["place_diag"]["lower_standoff_skim"] = True
+    place = _place_ee_target(sim, tid, dest_xy, place_z, hold)
+    if place is None:
+        return None
+    result["place_diag"]["lower_target_xy_mm"] = [round(place[0] * 1000, 1), round(place[1] * 1000, 1)]
+    result["place_diag"]["lower_vertical"] = True
+    if not move_lin(sim, place, duration=1.2, physics=True, n_wp=12, lock_joints=hold, down=True):
+        return None
+    return place
+
+
 def _carry_candidates(start, goal, cfg: dict, n_wp: int, lock: tuple[str, ...]):
     """Locked straight (floored to r≥190 mm), then a higher line, then unlock wrist_flex."""
     n_wp = max(8, int(n_wp))
@@ -2548,7 +2602,15 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     # lower first, then slide in at place height (same radius rule as lift).
     place_z = float(g_close[2]) + place_hover
     standoff = bool(result.get("transport_standoff"))
-    if standoff:
+    # Vertical place: align the *piece* over dest with the gripper world-down,
+    # then descend straight. The pinch offset is measured in the gripper
+    # frame and mapped through the vertical rotation at dest, so a carry that
+    # tilted the wrist no longer lands the piece 5-25 mm off. Falls back to
+    # the legacy carry-lock lower when the vertical pose is out of reach.
+    vertical_place = _lower_vertical(sim, tid, dest_xy, place_z, hold, result)
+    if vertical_place:
+        place = vertical_place
+    elif standoff:
         down = [float(gpos[0]), float(gpos[1]), place_z]
         if not _carry_lin(sim, down, 0.8, 8, hold, extract):
             result["failure_reason"] = "IK_FAILURE"

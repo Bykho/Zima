@@ -16,7 +16,7 @@ sim:
     pregrasp_z: 0.10
     grasp_z: 0.015
     lift_z: 0.08
-    place_hover: 0.003
+    place_hover: 0.0
     release_lift_z: 0.08
     place_xy_tol: 0.018
     # 3/4 of the 0.8 full-open pose. Enough to clear a piece; the joint
