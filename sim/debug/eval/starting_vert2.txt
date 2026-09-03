@@ -1,0 +1,98 @@
+STARTING-BOARD POPULATED STUDY
+Frozen: perception, camera, grasp compensation, aperture, transport, release.
+EPISODES: 64 (pickup GT 32, pickup vision 32, place 0)
+DESTINATIONS (place follow-up): d4, a4, e5
+
+PICKUP+LIFT GT:     31/32 (97%)
+PICKUP+LIFT VISION: 27/32 (84%)
+PLACE (among follow-ups): n/a
+FULL PLACE EPISODE: n/a
+UNSTACK ATTEMPTED:  4/64
+UNSTACK MOVED:      4/64
+RESTACK FAIL:       3
+
+STARTING PICKUP MAP — GT
+      a    b    c    d    e    f    g    h
+ 8   P    P    P    P    P    P    P    P 
+ 7   P    P    P    P    P    P    P    P 
+ 6   -    -    -    -    -    -    -    - 
+ 5   -    -    -    -    -    -    -    - 
+ 4   -    -    -    -    -    -    -    - 
+ 3   -    -    -    -    -    -    -    - 
+ 2   P    P    P    P    P    P    P    P 
+ 1   P    P    P    P    P    P    P    F 
+    (P=pickup+lift ok  F=fail  -=not run)
+
+STARTING PICKUP MAP — VISION
+      a    b    c    d    e    f    g    h
+ 8   P    P    P    F    P    P    P    F 
+ 7   P    P    P    P    P    P    P    P 
+ 6   -    -    -    -    -    -    -    - 
+ 5   -    -    -    -    -    -    -    - 
+ 4   -    -    -    -    -    -    -    - 
+ 3   -    -    -    -    -    -    -    - 
+ 2   P    P    P    P    P    P    P    P 
+ 1   P    P    P    F    P    P    F    F 
+    (P=pickup+lift ok  F=fail  -=not run)
+
+GT FAILURES:
+  rook    h1  RECOVER_STILL_DOWN  obs=bishop@h1 bishop_f1
+
+VISION FAILURES:
+  queen   d8  RECOVER_IK  obs=pawn@d7 pawn_d7
+  rook    h8  RECOVER_DROP  obs=pawn@g7 palm
+  queen   d1  RECOVER_STILL_DOWN  obs=pawn@d2 pawn_d2
+  knight  g1  RECOVER_TRANSIT  obs=pawn@g2 jaw
+  rook    h1  RECOVER_IK  obs=bishop@? bishop_f1
+
+SUCCESS BY PIECE TYPE (GT pickup):
+  pawn     16/16
+  rook     3/4
+  bishop   4/4
+  knight   4/4
+  queen    2/2
+  king     2/2
+
+SUCCESS BY PIECE TYPE (vision pickup):
+  pawn     16/16
+  rook     2/4
+  bishop   4/4
+  knight   3/4
+  queen    0/2
+  king     2/2
+
+SUCCESS BY RANK (GT pickup):
+  rank 1  7/8
+  rank 2  8/8
+  rank 7  8/8
+  rank 8  8/8
+
+SUCCESS BY RANK (vision pickup):
+  rank 1  5/8
+  rank 2  8/8
+  rank 7  8/8
+  rank 8  6/8
+
+PICKUP FAILURE REASONS (GT+vision):
+  SUCCESS: 57
+  RECOVER_STILL_DOWN: 2
+  RECOVER_IK: 2
+  PLACEMENT_POSITION_ERROR: 1
+  RECOVER_TRANSIT: 1
+  RECOVER_DROP: 1
+
+FAILED-PICKUP FIRST OBSTRUCTION (robot part):
+  none: 4
+  jaw: 1
+  palm: 1
+
+TOP 3 FAILURE MECHANISMS (all episodes):
+  1. RECOVER_STILL_DOWN (2)
+  2. RECOVER_IK (2)
+  3. PLACEMENT_POSITION_ERROR (1)
+
+OTHER REASONS:
+  RECOVER_STILL_DOWN: 2
+  RECOVER_TRANSIT: 1
+  RECOVER_IK: 2
+  RECOVER_DROP: 1

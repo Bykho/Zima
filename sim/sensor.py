@@ -28,6 +28,29 @@ def _mujoco_cv_extrinsics(sim, camera: str) -> tuple[np.ndarray, np.ndarray]:
     return R_cv, t
 
 
+def wrist_sees_point(sim, xyz, camera: str = DEFAULT_CAMERA) -> bool:
+    """True if world XYZ is in the wrist camera frustum and D405 range."""
+    import mujoco
+
+    xyz = np.asarray(xyz, dtype=np.float64)
+    cid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, camera)
+    if cid < 0:
+        return False
+    mujoco.mj_forward(sim.model, sim.data)
+    R, t = _mujoco_cv_extrinsics(sim, camera)
+    x_c = R.T @ (xyz - t)
+    z = float(x_c[2])
+    if z < D405_NEAR or z > D405_FAR:
+        return False
+    cam_cfg = (sim.cfg or {}).get("sim", {}).get("camera", {})
+    w = int(cam_cfg.get("width", 320))
+    h = int(cam_cfg.get("height", 240))
+    K = K_from_fovy(w, h, float(sim.model.cam_fovy[cid]))
+    u = float(K[0, 0] * x_c[0] / z + K[0, 2])
+    v = float(K[1, 1] * x_c[1] / z + K[1, 2])
+    return 4.0 <= u < w - 4.0 and 4.0 <= v < h - 4.0
+
+
 def capture(sim, width: int | None = None, height: int | None = None, camera: str = DEFAULT_CAMERA) -> RgbdObservation:
     """Current backend: simulated D405 on the SO-ARM wrist."""
     cam_cfg = (sim.cfg or {}).get("sim", {}).get("camera", {})

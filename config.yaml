@@ -4,7 +4,10 @@ sim:
   use_gui: true
   timestep: 0.004166666666666667
   gravity: -9.81
-  arm_base_position: [0.0, 0.0, 0.0]
+  # Board is 85% of the 47.5 mm layout (40.375 mm squares). Piece meshes
+  # stay the same size — only square centers move. origin_x = arm_x + 0.08;
+  # origin_y = arm_y - 4 * square.
+  arm_base_position: [0.08, 0.045, 0.0]
   motor_force: 200.0
   pickup:
     source: d1
@@ -16,7 +19,13 @@ sim:
     place_hover: 0.003
     release_lift_z: 0.08
     place_xy_tol: 0.018
-    gripper_open: 0.45
+    # 3/4 of the 0.8 full-open pose. Enough to clear a piece; the joint
+    # stop (~1.75) slaps it. Approach may still narrow this for neighbors.
+    gripper_open: 0.60
+    # Release only. 0.30 ≈ 40 mm jaw gap (approach stays at 0.60 / ~63 mm).
+    gripper_release: 0.30
+    # Extra tries if a miss/drop leaves the piece upright on the board.
+    grasp_retries: 1
     gripper_closed: -0.12
     close_steps: 220
     lift_clearance: 0.04
@@ -24,13 +33,18 @@ sim:
     # Lift already reaches ~0.12 m world (~0.10 above the board); 0.08 is a
     # floor that does not add extra raise on the d1→d4 d2-clearance path.
     transport_clearance_z: 0.08
-    # Grasp EE offset from the believed object XY. Reduced Y vs 80% pinch
-    # travel ([3.76, 12.66]) so the open fixed jaw has a ~4 mm capture region.
-    grasp_xy_offset: [0.00376, 0.00866]
+    # Grasp EE offset from the believed object XY. Recentered so the pinch
+    # lies on the piece (old [3.76, 8.66] sat ~3 mm toward -X/+Y).
+    grasp_xy_offset: [0.00716, 0.00616]
   board:
-    origin: [0.22, -0.10, 0.0]
-    square_size: 0.0375
+    # 40.375 mm squares (15% smaller than 47.5 mm). Pieces are not scaled.
+    origin: [0.16, -0.1165, 0.0]
+    square_size: 0.040375
     surface_z: 0.02
+    # Drop captured pieces here (past the h-file, mid-ranks).
+    capture_bowl: [0.35, -0.26, 0.024]
+    # Well beside the bowl. Fallen pieces are inserted here to stand up.
+    reorient_nest: [0.22, -0.26, 0.024]
     yaw: 0.0
     # ee_link: hover IK target (see board.py module doc)
     ee_link: gripper_frame_link
@@ -140,7 +154,7 @@ poses:
     elbow_flex: 0.47
     wrist_flex: 1.18
     wrist_roll: 1.58
-    gripper: 0.45
+    gripper: 0.60
 
 real:
   port: null

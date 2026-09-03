@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ik import solve_ik
-from squares import shift_square, square_to_world
+from ik import solve_ik, solve_ik_down, solve_ik_upright
+from scenario import body_kind
+from squares import parse_square, shift_square, square_to_world
 
 JAW_BODIES = ("gripper", "moving_jaw_so101_v1")
 CAMERA_BODIES = ("camera_mount",)
@@ -41,12 +42,25 @@ def occupied_neighbor_bodies(sim, cfg: dict, source: str, scenario: dict | None 
         sq = nb.get("square")
         if sq in want:
             found[sq] = nb.get("id", "pawn")
+    size = float(cfg.get("sim", {}).get("board", {}).get("square_size", 0.0375))
     for i in range(sim.model.nbody):
         name = mujoco.mj_id2name(sim.model, mujoco.mjtObj.mjOBJ_BODY, i)
-        if not name or not name.startswith("proxy_"):
+        if not name or float(sim.data.xpos[i][2]) <= 0.0:
             continue
-        sq = name[6:]
-        if sq in want and float(sim.data.xpos[i][2]) > 0.0:
+        if name.startswith("proxy_"):
+            sq = name[6:]
+        elif body_kind(name):
+            sq = None
+            best = 0.55 * size
+            for nsq in want:
+                p = square_to_world(nsq, cfg)
+                d = float(np.hypot(float(sim.data.xpos[i][0]) - p[0], float(sim.data.xpos[i][1]) - p[1]))
+                if d < best:
+                    best = d
+                    sq = nsq
+        else:
+            continue
+        if sq in want:
             found[sq] = name
     return found
 
@@ -145,10 +159,14 @@ def apply_approach_gripper(sim, hover_xyz, gripper: float) -> bool:
 # Clutter-aware approach: small candidate set around the existing grasp.
 # Grasp XY is frozen. No camera, no RRT. Wrist-roll + aperture only.
 APPROACH_BODIES = ("gripper", "moving_jaw_so101_v1", "camera_mount", "wrist")
+PALM_BODIES = ("gripper", "camera_mount", "wrist")
 _ROLL_DELTAS = (0.35, -0.35, 0.70, -0.70, 1.05, -1.05, 1.57, -1.57, 2.10, -2.10)
 _DESCEND_U = (0.30, 0.55, 0.80)
 _APPROACH_MARGIN = 0.0005
+# Kinematic 0.5 mm still physics-clips on locked-wrist +Z (palm vs neighbor).
+_EXTRACT_MARGIN = 0.005
 _MIN_APPROACH_G = 0.12
+_PRE_OFFSET_SCALE = 0.55
 
 
 # --- transport: lift above the board envelope, then translate in XY ---
@@ -159,20 +177,24 @@ GRIPPER_BODIES = ("gripper", "moving_jaw_so101_v1")
 
 
 def _collision_geoms(sim, body: str) -> list[int]:
+    """Collision-enabled, non-plane geoms of a body. Model-static, so cached per Sim."""
     import mujoco
 
+    cache = sim.__dict__.setdefault("_collision_geom_cache", {})
+    hit = cache.get(body)
+    if hit is not None:
+        return hit
     bid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, body)
-    if bid < 0:
-        return []
-    out = []
-    for i in range(sim.model.ngeom):
-        if int(sim.model.geom_bodyid[i]) != bid:
-            continue
-        if int(sim.model.geom_contype[i]) == 0 and int(sim.model.geom_conaffinity[i]) == 0:
-            continue
-        if int(sim.model.geom_type[i]) == int(mujoco.mjtGeom.mjGEOM_PLANE):
-            continue
-        out.append(i)
+    out: list[int] = []
+    if bid >= 0:
+        m = sim.model
+        mask = (
+            (m.geom_bodyid == bid)
+            & ((m.geom_contype != 0) | (m.geom_conaffinity != 0))
+            & (m.geom_type != int(mujoco.mjtGeom.mjGEOM_PLANE))
+        )
+        out = [int(i) for i in np.flatnonzero(mask)]
+    cache[body] = out
     return out
 
 
@@ -261,7 +283,11 @@ def obstacle_bodies(sim, skip: set[str] | None = None) -> list[str]:
         board_id = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, "board")
         if board_id >= 0:
             c = sim.data.xpos[board_id][:2]
-            if abs(float(xy[0] - c[0])) > 0.16 or abs(float(xy[1] - c[1])) > 0.16:
+            gid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_GEOM, "board")
+            half = 0.20
+            if gid >= 0:
+                half = float(max(sim.model.geom_size[gid][0], sim.model.geom_size[gid][1])) + 0.02
+            if abs(float(xy[0] - c[0])) > half or abs(float(xy[1] - c[1])) > half:
                 continue
         geoms = _collision_geoms(sim, name)
         if not geoms:
@@ -325,6 +351,30 @@ def _min_gap(sim, a_bodies: tuple[str, ...], b_bodies: list[str]) -> float:
     return float(best)
 
 
+def closest_pair(sim, a_bodies, b_bodies) -> dict | None:
+    """Nearest (a_body, b_body) pair by geom distance. Diagnostics only."""
+    import mujoco
+
+    fromto = np.zeros(6)
+    best = 1.0
+    pair = None
+    for a in a_bodies:
+        for i in _collision_geoms(sim, a):
+            for b in b_bodies:
+                for j in _collision_geoms(sim, b):
+                    d = mujoco.mj_geomDistance(sim.model, sim.data, i, j, 0.20, fromto)
+                    if d < best:
+                        best = d
+                        pair = (a, b, float(d))
+    if pair is None:
+        return None
+    return {
+        "robot": pair[0],
+        "body": pair[1],
+        "clearance_mm": round(pair[2] * 1000.0, 2),
+    }
+
+
 def transit_clearances(sim, target_id: str, obstacles: list[str]) -> dict[str, float]:
     pieces = [n for n in obstacles if n != "board"]
     if not pieces:
@@ -383,7 +433,9 @@ def _clip_roll(sim, value: float) -> float:
     return float(np.clip(value, lo, hi))
 
 
-def _pose_for_candidate(sim, xyz, gripper: float, roll: float | None) -> tuple[bool, tuple[str, ...]]:
+def _pose_for_candidate(
+    sim, xyz, gripper: float, roll: float | None, lock_flex: bool
+) -> tuple[bool, tuple[str, ...]]:
     q = sim.qpos()
     q["gripper"] = float(gripper)
     lock: tuple[str, ...] = ()
@@ -391,27 +443,190 @@ def _pose_for_candidate(sim, xyz, gripper: float, roll: float | None) -> tuple[b
         q["wrist_roll"] = _clip_roll(sim, roll)
         lock = ("wrist_roll",)
     sim.set_qpos(q, hold=True)
-    return bool(solve_ik(sim, xyz, lock_joints=lock)), lock
+    if lock_flex:
+        # "Vertical" family: gripper +X world-down at every checked point,
+        # flex free for the solver. Mirrors what pickup executes (down=True).
+        if solve_ik_down(sim, xyz, lock_joints=lock):
+            return True, lock
+        return False, lock
+    if solve_ik_upright(sim, xyz, lock_joints=lock):
+        return True, lock
+    return False, lock
 
 
-def _candidate_clear(sim, pre, grasp, neighbors: list[str], gripper: float, roll: float | None) -> str:
-    """'ok', 'ik', or 'collision'. Grasp XY itself is not collision-tested (jaws must enter the square)."""
+def _solve_path_point(sim, xyz, lock, vertical: bool) -> bool:
+    if vertical:
+        return solve_ik_down(sim, xyz, lock_joints=lock)
+    return solve_ik_upright(sim, xyz, lock_joints=lock)
+
+
+def approach_xy_offsets(source: str | None, occ: dict[str, str], cfg: dict | None) -> list[tuple[float, float]]:
+    """Pregrasp XY shifts away from occupied neighbors. Grasp XY stays frozen.
+
+    Starting-rank clutter is usually denser toward the board interior, so the
+    first nonzero offset is typically off the back rank — still generic: it
+    follows occupancy, not square names.
+    """
+    out: list[tuple[float, float]] = [(0.0, 0.0)]
+    if not source or not occ:
+        return out
+    size = float((cfg or {}).get("sim", {}).get("board", {}).get("square_size", 0.0375))
+    # Gripper envelope does not shrink with the board. Floor the step so
+    # tighter squares still lean the pregrasp off the neighboring pawn.
+    step = max(0.032, _PRE_OFFSET_SCALE * size)
+    file_i, rank = parse_square(source)
+    acc = np.zeros(2)
+    for sq in occ:
+        fi, r = parse_square(sq)
+        acc += np.array([float(fi - file_i), float(r - rank)])
+    if float(np.linalg.norm(acc)) < 0.25:
+        acc = np.array([file_i - 3.5, rank - 4.5])
+    else:
+        acc = -acc
+    n = float(np.linalg.norm(acc))
+    if n < 1e-9:
+        return out
+    u = acc / n
+    raw = [
+        (float(u[0] * step), float(u[1] * step)),
+        (float(u[0] * step * 1.8), float(u[1] * step * 1.8)),
+        (float(u[0] * step), 0.0),
+        (0.0, float(u[1] * step)),
+    ]
+    seen = {(0.0, 0.0)}
+    for dx, dy in raw:
+        key = (round(dx, 4), round(dy, 4))
+        if key in seen or (abs(dx) < 1e-4 and abs(dy) < 1e-4):
+            continue
+        seen.add(key)
+        out.append((dx, dy))
+    return out
+
+
+_WORKSPACE_R_M = 0.19
+
+
+def _arm_base_xy(cfg: dict | None) -> np.ndarray:
+    raw = (cfg or {}).get("sim", {}).get("arm_base_position") or [0.08, 0.045, 0.0]
+    return np.asarray(raw[:2], dtype=float)
+
+
+def _extract_zs(cfg: dict | None) -> tuple[float, ...]:
+    lift = 0.08
+    if cfg:
+        lift = float(cfg.get("sim", {}).get("pickup", {}).get("lift_z", lift))
+    # Palm clips neighbors in the first centimetres of +Z, not at full lift height.
+    # z=0 is the closed-finger grasp pose the lift actually starts from.
+    zs = (0.0, 0.01, 0.02, 0.04, float(lift))
+    return tuple(sorted({round(float(z), 4) for z in zs if z >= -1e-9}))
+
+
+def _extract_xyzs(grasp, cfg: dict | None) -> list[np.ndarray]:
+    """Locked-wrist lift samples, including the workspace-floor XY the live lift uses."""
+    grasp = np.asarray(grasp, dtype=float)
+    zs = _extract_zs(cfg)
+    lift = float(zs[-1]) if zs else 0.08
+    base = _arm_base_xy(cfg)
+    p = grasp[:2]
+    v = p - base
+    n = float(np.linalg.norm(v))
+    extra = max(0.0, _WORKSPACE_R_M - n)
+    if extra > 0.001:
+        if n < 1e-9:
+            v, n = np.array([1.0, 0.0], dtype=float), 1.0
+        lift_xy = p + v * (extra / n)
+    else:
+        lift_xy = p
+    out = []
+    for z in zs:
+        u = 0.0 if lift < 1e-9 else float(z) / lift
+        xy = p + u * (lift_xy - p)
+        out.append(np.array([float(xy[0]), float(xy[1]), float(grasp[2] + z)], dtype=float))
+    return out
+
+
+def _extract_clear(
+    sim, grasp, neighbors: list[str], extract_lock, cfg: dict | None, vertical: bool = False
+) -> str | None:
+    """None if extract is clear, else 'ik' / 'extract'.
+
+    Jaws are allowed to occupy the source column at grasp. Extract flags
+    palm/wrist/camera vs a neighbor — the locked-wrist lift clip.
+    """
+    for xyz in _extract_xyzs(grasp, cfg):
+        ok = (
+            solve_ik_down(sim, xyz, lock_joints=extract_lock)
+            if vertical
+            else solve_ik(sim, xyz, lock_joints=extract_lock)
+        )
+        if not ok:
+            return "ik"
+        if _min_gap(sim, PALM_BODIES, neighbors) < _EXTRACT_MARGIN:
+            return "extract"
+    return None
+
+
+def _candidate_clear(
+    sim,
+    pre,
+    grasp,
+    neighbors: list[str],
+    gripper: float,
+    roll: float | None,
+    cfg: dict | None = None,
+    require_extract: bool = True,
+) -> str:
+    """'ok', 'ik', 'collision', or 'extract'. Grasp XY is not tested (jaws must enter).
+
+    Descend uses the approach roll lock. Extract uses that same candidate's
+    lift lock (flex+roll) and a wider margin — palm vs a neighbor column is
+    a lift hit. A different roll is allowed when it extracts under its own
+    lock; the live lift holds that roll after close.
+    """
     here, _ = sim.site_pose("gripperframe")
-    ok, lock = _pose_for_candidate(sim, pre, gripper, roll)
-    if not ok:
-        return "ik"
-    if neighbor_approach_gap(sim, neighbors) < _APPROACH_MARGIN:
-        return "collision"
+    start = sim.qpos()
     pre = np.asarray(pre, dtype=float)
     grasp = np.asarray(grasp, dtype=float)
     path = [here + (pre - here) * u for u in (0.4, 0.8)]
     path.extend(pre + (grasp - pre) * float(u) for u in _DESCEND_U)
-    for xyz in path:
-        if not solve_ik(sim, xyz, lock_joints=lock):
-            return "ik"
-        if neighbor_approach_gap(sim, neighbors) < _APPROACH_MARGIN:
-            return "collision"
-    return "ok"
+    last = "ik"
+    used_lock: tuple[str, ...] = ()
+    for lock_flex in (True, False):
+        sim.set_qpos(start, hold=True)
+        ok, lock = _pose_for_candidate(sim, pre, gripper, roll, lock_flex)
+        if not ok:
+            continue
+        used_lock = lock
+        descend_hit = neighbor_approach_gap(sim, neighbors) < _APPROACH_MARGIN
+        path_ok = True
+        for xyz in path:
+            if not _solve_path_point(sim, xyz, lock, lock_flex):
+                path_ok = False
+                break
+            if neighbor_approach_gap(sim, neighbors) < _APPROACH_MARGIN:
+                descend_hit = True
+        if not path_ok:
+            last = "ik"
+            continue
+        if not _solve_path_point(sim, grasp, lock, lock_flex):
+            last = "ik"
+            continue
+        if require_extract:
+            # Live lift is vertical (down=True, roll lock only) with a
+            # locked-wrist fallback; accept if either extract is clear.
+            hold_lock = tuple(dict.fromkeys((*lock, "wrist_roll")))
+            hit = _extract_clear(sim, grasp, neighbors, hold_lock, cfg, vertical=True)
+            if hit:
+                extract_lock = tuple(dict.fromkeys((*hold_lock, "wrist_flex")))
+                hit = _extract_clear(sim, grasp, neighbors, extract_lock, cfg)
+            if hit:
+                last = hit
+                continue
+        if descend_hit:
+            last = "collision"
+            continue
+        return "ok", used_lock
+    return last, used_lock
 
 
 def plan_approach(
@@ -423,17 +638,29 @@ def plan_approach(
     source: str | None = None,
     cfg: dict | None = None,
     scenario: dict | None = None,
+    require_extract: bool = True,
+    force_roll: float | None = None,
+    lock_roll: bool = False,
+    grasp_for_roll=None,
 ) -> dict:
     """First collision-free reachable approach around the frozen grasp XY.
 
-    Candidates: unconstrained then a few wrist-roll deltas × open/narrow aperture.
-    Empty occupancy returns the current default (unlocked roll, open gripper).
+    Candidates: unconstrained then wrist-roll × aperture, then the same at a
+    few pregrasp XY offsets away from occupied neighbors. Grasp XY is frozen.
+    A candidate must also clear locked-wrist +Z extract. Empty occupancy
+    returns the current default (unlocked roll, open gripper).
     """
     start = sim.qpos()
+    pre0 = np.asarray(pre, dtype=float)
+    grasp = np.asarray(grasp, dtype=float)
 
     def restore():
         sim.set_qpos(start, hold=True)
 
+    def pre_at(dx: float, dy: float) -> list[float]:
+        return [float(pre0[0] + dx), float(pre0[1] + dy), float(pre0[2])]
+
+    occ: dict[str, str] = {}
     narrow = None
     if neighbors and source and cfg is not None:
         occ = occupied_neighbor_bodies(sim, cfg, source, scenario)
@@ -445,50 +672,108 @@ def plan_approach(
     grippers = [float(open_g)]
     if narrow is not None and abs(float(narrow) - float(open_g)) > 0.02:
         grippers.append(float(narrow))
+    xy_list = approach_xy_offsets(source, occ, cfg) if neighbors else [(0.0, 0.0)]
 
     restore()
     q = sim.qpos()
     q["gripper"] = float(open_g)
     sim.set_qpos(q, hold=True)
-    ik0 = bool(solve_ik(sim, pre))
-    base_roll = float(sim.qpos()["wrist_roll"]) if ik0 else float(start["wrist_roll"])
+    base_roll = float(start["wrist_roll"])
+    for dx, dy in xy_list:
+        if solve_ik(sim, pre_at(dx, dy)):
+            base_roll = float(sim.qpos()["wrist_roll"])
+            break
     restore()
 
-    candidates: list[tuple[int, float | None, float]] = [(0, None, grippers[0])]
+    # Roll is redundant for a vertical pinch, so a "free" roll drifts by up to
+    # a radian between planning and the executed pre/descend, and the pinch
+    # axis (hence the fixed-pad grasp offset) drifts with it. Always plan and
+    # execute an explicit roll; the natural one is what position IK lands on.
+    roll_cands: list[tuple[int, float | None, float]] = [(0, base_roll, grippers[0])]
     rank = 1
     for g in grippers[1:]:
-        candidates.append((rank, None, g))
+        roll_cands.append((rank, base_roll, g))
         rank += 1
     for droll in _ROLL_DELTAS:
         roll = _clip_roll(sim, base_roll + droll)
         for g in grippers:
-            candidates.append((rank, roll, g))
+            roll_cands.append((rank, roll, g))
+            rank += 1
+    # Far pregrasp XY: free roll first, then only large rolls.
+    coarse_rolls = [_clip_roll(sim, base_roll + d) for d in (1.57, -1.57, 2.10, -2.10)]
+    offset_cands: list[tuple[int, float | None, float]] = [(rank, base_roll, g) for g in grippers]
+    rank += len(grippers)
+    for roll in coarse_rolls:
+        for g in grippers:
+            offset_cands.append((rank, roll, g))
             rank += 1
 
     reachable = 0
     tried = 0
-    if not neighbors:
+    if not neighbors and not lock_roll:
+        restore()
+        grasp0 = grasp if grasp_for_roll is None else np.asarray(grasp_for_roll(base_roll), dtype=float)
         restore()
         return {
             "ok": True,
-            "roll": None,
+            "roll": float(base_roll),
             "gripper": float(open_g),
-            "lock_joints": (),
+            "lock_joints": ("wrist_roll",),
             "n_wp": 1,
             "tried": 1,
             "reachable": 1,
             "rank": 0,
+            "pre": pre_at(0.0, 0.0),
+            "grasp": [float(v) for v in grasp0],
+            "pre_offset_xy": [0.0, 0.0],
         }
 
-    for rank, roll, gripper in candidates:
+    ordered: list[tuple[float, float, int, float | None, float]] = []
+    for crank, roll, gripper in roll_cands:
+        ordered.append((0.0, 0.0, crank, roll, gripper))
+    for dx, dy in xy_list:
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            continue
+        for crank, roll, gripper in offset_cands:
+            ordered.append((dx, dy, crank, roll, gripper))
+    if lock_roll:
+        ordered = [(0.0, 0.0, 0, force_roll, grippers[0])]
+
+    first_block = None
+    extract_block = None
+    grasp_cache: dict[float | None, np.ndarray] = {}
+
+    def grasp_at(roll: float | None) -> np.ndarray:
+        if grasp_for_roll is None:
+            return grasp
+        key = None if roll is None else round(float(roll), 4)
+        if key not in grasp_cache:
+            restore()
+            grasp_cache[key] = np.asarray(grasp_for_roll(roll), dtype=float)
+        return grasp_cache[key]
+
+    for dx, dy, crank, roll, gripper in ordered:
         tried += 1
         restore()
-        status = _candidate_clear(sim, pre, grasp, neighbors, gripper, roll)
+        pre_i = pre_at(dx, dy)
+        grasp_i = grasp_at(roll)
+        status, cand_lock = _candidate_clear(
+            sim, pre_i, grasp_i, neighbors, gripper, roll, cfg, require_extract=require_extract
+        )
         if status != "ik":
             reachable += 1
+        if status == "extract" and extract_block is None:
+            extract_block = closest_pair(sim, PALM_BODIES, neighbors) or closest_pair(
+                sim, APPROACH_BODIES, neighbors
+            )
+        if status == "collision" and first_block is None:
+            first_block = closest_pair(sim, APPROACH_BODIES, neighbors)
         if status == "ok":
             restore()
-            lock = ("wrist_roll",) if roll is not None else ()
+            # Keep the lock the candidate was verified with. When flex was
+            # locked (the vertical wrist set before planning) the descend
+            # inherits it, so the pinch closes at the planned tilt.
+            lock = tuple(cand_lock) if cand_lock else (("wrist_roll",) if roll is not None else ())
             return {
                 "ok": True,
                 "roll": None if roll is None else float(roll),
@@ -497,7 +782,10 @@ def plan_approach(
                 "n_wp": 8,
                 "tried": tried,
                 "reachable": reachable,
-                "rank": rank,
+                "rank": crank,
+                "pre": pre_i,
+                "grasp": [float(v) for v in grasp_i],
+                "pre_offset_xy": [float(dx), float(dy)],
             }
 
     restore()
@@ -511,4 +799,7 @@ def plan_approach(
         "reachable": reachable,
         "rank": None,
         "reason": "collision" if reachable else "ik",
+        "pre": pre_at(0.0, 0.0),
+        "pre_offset_xy": [0.0, 0.0],
+        "block": extract_block or first_block,
     }

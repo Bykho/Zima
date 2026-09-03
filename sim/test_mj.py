@@ -78,6 +78,21 @@ def test_gripper_gap():
     return check("gripper opens", ok, f"closed={closed*1000:.1f}mm open={opened*1000:.1f}mm")
 
 
+def test_arm_base_applied():
+    import mujoco
+
+    sim = Sim()
+    bid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, "base")
+    origin = [float(x) for x in sim.model.body_pos[bid]]
+    sim.apply_arm_base([origin[0] + 0.08, origin[1] + 0.03, origin[2]])
+    moved = [float(x) for x in sim.model.body_pos[bid]]
+    sim.apply_arm_base(origin)
+    restored = [float(x) for x in sim.model.body_pos[bid]]
+    sim.close()
+    ok = abs(moved[0] - origin[0] - 0.08) < 1e-9 and abs(restored[0] - origin[0]) < 1e-9
+    return check("arm base position", ok, f"origin={origin[:2]} moved={moved[:2]}")
+
+
 def test_ik_above_d1():
     sim = Sim()
     cfg = load_config()
@@ -127,6 +142,156 @@ def test_wrist_localize():
     )
 
 
+def test_unstack_policy():
+    from sequence import (
+        Move,
+        UnstackFrame,
+        choose_blocker,
+        choose_park,
+        forward_blockers,
+        plan_unstack_move,
+        restore_order,
+    )
+
+    occ = {"g1": "proxy_g1", "g2": "proxy_g2", "h2": "proxy_h2"}
+    home = choose_blocker("h1", occ, {"h1", "d4"}, {"rook"})
+    ok_pawn = check("unstack prefers pawn", home == "g2", f"home={home}")
+    occupied = {
+        "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
+        "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
+        "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
+        "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
+        "d4",
+    }
+    park = choose_park({}, occupied)
+    ok_park = check("unstack parks a quiet empty square", park == "f4", f"park={park}")
+    home2 = choose_blocker("a2", {"a1": "proxy_a1", "b2": "proxy_b2"}, {"a2"}, {"pawn"})
+    ok_skip = check("unstack skips same type", home2 == "a1", f"home={home2}")
+    moves = [
+        Move("pawn", "g2", "d3"),
+        Move("knight", "g1", "e3"),
+    ]
+    rest = restore_order(moves)
+    ok_lifo = check(
+        "unstack LIFO restore list",
+        rest[0].src == "e3" and rest[0].dst == "g1" and rest[1].src == "d3" and rest[1].dst == "g2",
+        f"rest={[ (m.kind, m.src, m.dst) for m in rest ]}",
+    )
+    planned = plan_unstack_move("h1", "rook", occ, {"h1", "d4"}, {"rook"}, occupied)
+    ok_plan = check(
+        "plan_unstack_move parks pawn",
+        planned is not None and planned.kind == "pawn" and planned.src == "g2" and planned.dst == "f4",
+        f"move={planned}",
+    )
+    stack = [
+        UnstackFrame("pawn", "g2", "d3", [0.0, 0.0, 0.0], True),
+        UnstackFrame("knight", "g1", "e3", [0.0, 0.0, 0.0], True),
+    ]
+    last = stack.pop()
+    ok_frame = check("unstack LIFO restore", last.kind == "knight" and last.home == "g1", last.home)
+    front = forward_blockers("g1", {"g2": "proxy_g2", "f1": "proxy_f1", "h2": "proxy_h2"}, {"knight"})
+    ok_front = check("forward blockers are center-rank pawns", set(front) == {"g2", "h2"}, f"front={front}")
+    none = forward_blockers("a2", {"a1": "proxy_a1", "b2": "proxy_b2"}, {"pawn"})
+    ok_none = check("forward blockers skip same type", none == [], f"front={none}")
+    from pickup import bowl_contains
+
+    ok_bowl = check(
+        "bowl drop is not a chess square",
+        bowl_contains([0.35, -0.26, 0.024], [0.35, -0.26, 0.024])
+        and not bowl_contains([0.351, 0.006, 0.02], [0.35, -0.26, 0.024]),
+    )
+    return ok_pawn and ok_park and ok_skip and ok_lifo and ok_plan and ok_frame and ok_front and ok_none and ok_bowl
+
+
+def test_home_clears_pieces():
+    import numpy as np
+    from ik import EE_SITE, solve_ik
+    from pickup import FULL_BOARD_XML, queen_upright, seed_vertical
+    from squares import bowl_xyz
+
+    cfg = load_config()
+    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    seed_vertical(sim, cfg, snap=True)
+    q0, _ = sim.object_pose("queen_d1")
+    b = bowl_xyz(cfg)
+    ok_ik = solve_ik(sim, [b[0], b[1], 0.04])
+    sim.hold(sim.qpos())
+    for _ in range(16):
+        sim.step()
+    seed_vertical(sim, cfg, snap=False)
+    q1, quat1 = sim.object_pose("queen_d1")
+    gpos, _ = sim.site_pose(EE_SITE)
+    drift = float(np.linalg.norm(q1[:2] - q0[:2]))
+    sim.close()
+    return check(
+        "home path clears the queen",
+        bool(ok_ik) and drift < 0.008 and queen_upright(quat1),
+        f"drift={drift * 1000:.1f}mm ee_z={gpos[2]:.3f}",
+    )
+
+
+def test_cart_speed_near_far():
+    import numpy as np
+    from ik import FAR_VEL, NEAR_M, NEAR_VEL, _path_time
+
+    a = np.array([0.0, 0.0, 0.0])
+    b = np.array([0.20, 0.0, 0.0])
+    t_cruise = _path_time(a, b, np.array([1.0, 0.0, 0.0]), False)
+    t_near = _path_time(a, np.array([0.03, 0.0, 0.0]), np.array([0.03, 0.0, 0.0]), False)
+    expect_cruise = 0.20 / FAR_VEL
+    ok = (
+        abs(t_cruise - expect_cruise) < 0.04
+        and t_near > 0.03 / NEAR_VEL * 0.7
+        and t_cruise < t_near * (0.20 / 0.03)
+        and NEAR_M == 0.0508
+    )
+    return check(
+        "cruise faster than last 2 inches",
+        ok,
+        f"t_20cm_far={t_cruise:.2f}s t_3cm_near={t_near:.2f}s",
+    )
+
+
+def test_column_descend_tracks_xy():
+    import numpy as np
+    from ik import EE_SITE, servo_lin, solve_ik
+    from pickup import seed_vertical
+
+    cfg = load_config()
+    sim = Sim(cfg=cfg)
+    seed_vertical(sim, cfg, snap=True)
+    xy = square_to_world("d4", cfg)
+    high = [xy[0], xy[1], 0.12]
+    low = [xy[0], xy[1], 0.05]
+    ok_ik = solve_ik(sim, high, lock_joints=("wrist_flex",))
+    drift = [0.0]
+    z0 = [None]
+    prev = sim.on_step
+
+    def _hook():
+        if prev:
+            prev()
+        ee, _ = sim.site_pose(EE_SITE)
+        if z0[0] is None:
+            z0[0] = float(ee[2])
+        if abs(float(ee[2]) - z0[0]) >= 0.003:
+            drift[0] = max(drift[0], float(np.hypot(ee[0] - xy[0], ee[1] - xy[1])))
+
+    sim.on_step = _hook
+    ok_move = servo_lin(
+        sim, low, physics=True, lock_joints=("wrist_flex",), column=True, ref=low
+    )
+    ee, _ = sim.site_pose(EE_SITE)
+    z_err = abs(float(ee[2]) - 0.05)
+    sim.close()
+    ok = bool(ok_ik) and bool(ok_move) and drift[0] < 0.006 and z_err < 0.015
+    return check(
+        "column descend holds XY",
+        ok,
+        f"xy_drift={drift[0]*1000:.1f}mm z_err={z_err*1000:.1f}mm",
+    )
+
+
 def main():
     quick = "--quick" in sys.argv
     print("Zima MuJoCo tests" + (" (quick)" if quick else "") + "\n")
@@ -134,7 +299,12 @@ def main():
         test_load_and_render(),
         test_joints_move(),
         test_gripper_gap(),
+        test_arm_base_applied(),
         test_ik_above_d1(),
+        test_unstack_policy(),
+        test_home_clears_pieces(),
+        test_cart_speed_near_far(),
+        test_column_descend_tracks_xy(),
     ]
     if not quick:
         results.append(test_wrist_localize())

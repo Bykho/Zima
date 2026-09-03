@@ -2,8 +2,22 @@
 
 from __future__ import annotations
 
-# Grasp XY is gripper-frame compensation (frozen queen values), not a per-square hack.
-_GRASP_XY = [0.00376, 0.00866]
+# Grasp XY is gripper-frame compensation, shared by all pieces. Recentered
+# so the jaw pinch sits on the piece (was ~3 mm off toward -X/+Y, which made
+# ±2 mm errors peel on lift/carry). Not a per-square or per-piece table.
+_GRASP_XY = [0.00716, 0.00616]
+
+# moving_jaw_box3 top sits ~19 mm above the commanded grasp height. Keep that
+# pad below any cylinder brim underside so close cannot hook a lip.
+_PAD_ABOVE_GRASP = 0.019
+_BRIM_CLEARANCE = 0.001
+
+
+def _grasp_height(nominal: float, brim_underside: float | None = None) -> float:
+    if brim_underside is None:
+        return nominal
+    return min(nominal, brim_underside - _PAD_ABOVE_GRASP - _BRIM_CLEARANCE)
+
 
 PIECES = {
     "pawn": {
@@ -11,7 +25,8 @@ PIECES = {
         "height": 0.037,
         "width": 0.018,
         "stem_width": 0.011,
-        "preferred_grasp_height": 0.012,
+        # pawn_head sphere center; full underside would put the pad on the base
+        "preferred_grasp_height": _grasp_height(0.012, 0.030),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.08,
     },
@@ -20,7 +35,8 @@ PIECES = {
         "height": 0.036,
         "width": 0.024,
         "stem_width": 0.016,
-        "preferred_grasp_height": 0.016,
+        # rook_top underside (pos 0.032, half-height 0.004)
+        "preferred_grasp_height": _grasp_height(0.016, 0.028),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.04,
     },
@@ -29,7 +45,7 @@ PIECES = {
         "height": 0.044,
         "width": 0.020,
         "stem_width": 0.011,
-        "preferred_grasp_height": 0.016,
+        "preferred_grasp_height": _grasp_height(0.016),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.08,
     },
@@ -38,7 +54,7 @@ PIECES = {
         "height": 0.036,
         "width": 0.020,
         "stem_width": 0.014,
-        "preferred_grasp_height": 0.014,
+        "preferred_grasp_height": _grasp_height(0.014),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.05,
     },
@@ -47,7 +63,8 @@ PIECES = {
         "height": 0.055,
         "width": 0.022,
         "stem_width": 0.009,
-        "preferred_grasp_height": 0.015,
+        # queen_collar underside (pos 0.031, half-height 0.003)
+        "preferred_grasp_height": _grasp_height(0.015, 0.028),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.12,
     },
@@ -56,7 +73,8 @@ PIECES = {
         "height": 0.054,
         "width": 0.024,
         "stem_width": 0.012,
-        "preferred_grasp_height": 0.018,
+        # king_crown underside (pos 0.037, half-height 0.005)
+        "preferred_grasp_height": _grasp_height(0.018, 0.032),
         "grasp_xy_offset": list(_GRASP_XY),
         "gripper_closed": -0.06,
     },
@@ -232,7 +250,12 @@ def transport_scenarios() -> list[dict]:
 
 def full_board_scenario(**kwargs) -> dict:
     """Starting-position board; pieces live in chess_scene_full.xml, not as pickup neighbors."""
-    kw = dict(name="full_board_d1_d4", quiet=kwargs.pop("quiet", False))
+    kw = dict(
+        name="full_board_d1_d4",
+        quiet=kwargs.pop("quiet", False),
+        target_id=kwargs.pop("target_id", "queen_d1"),
+        hide_proxy="d1",
+    )
     kw.update(kwargs)
     return scenario(**kw)
 
@@ -241,7 +264,7 @@ def piece_scenario(kind: str, source: str, dest: str, perception: str = "gt", **
     geom = dict(PIECES[kind])
     kw = dict(
         name=kwargs.pop("name", f"{kind}_{source}_{dest}_{perception}"),
-        target_id=kind,
+        target_id=kwargs.pop("target_id", kind),
         source=source,
         dest=dest,
         geometry=geom,
@@ -271,7 +294,8 @@ def dest_reach_scenarios(perception: str = "gt") -> list[dict]:
     return [piece_scenario("queen", "d1", dest, perception=perception) for dest in DEST_SQUARES if dest != "d1"]
 
 
-# Standard chess starting squares. One free body per type; other squares are proxies.
+# Standard chess starting squares. Full-board XML has one free body per square:
+# `{kind}_{square}` (pawn_e2, queen_d1, …).
 STARTING_POSITION = (
     ("rook", "a1"),
     ("knight", "b1"),
@@ -307,6 +331,34 @@ STARTING_POSITION = (
     ("rook", "h8"),
 )
 STARTING_AT = {sq: kind for kind, sq in STARTING_POSITION}
+STARTING_BODIES = tuple(f"{kind}_{sq}" for kind, sq in STARTING_POSITION)
+
+
+def starting_body(kind: str, square: str) -> str:
+    return f"{kind}_{square}"
+
+
+def body_kind(name: str) -> str | None:
+    """Piece type for a free body (`queen`, `pawn_e2`) or None."""
+    if not name:
+        return None
+    if name in PIECE_BODIES:
+        return name
+    for kind in PIECE_BODIES:
+        prefix = f"{kind}_"
+        if name.startswith(prefix) and len(name) == len(prefix) + 2:
+            return kind
+    return None
+
+
+def is_piece_body(name: str) -> bool:
+    if not name:
+        return False
+    if name.startswith("proxy_"):
+        return True
+    return body_kind(name) is not None
+
+
 # Empty on a starting board (ranks 3–6). Near / center / far-center.
 STARTING_DESTS = ("d4", "a4", "e5")
 
@@ -330,6 +382,7 @@ def starting_pickup_scenarios(perception: str = "gt", dest: str = "d4", stop_aft
                 name=f"start_{tag}_{kind}_{src}_{dest}_{perception}",
                 hide_proxy=src,
                 stop_after=stop_after,
+                target_id=starting_body(kind, src),
             )
         )
     return cases
@@ -344,4 +397,5 @@ def starting_place_scenario(kind: str, source: str, dest: str, perception: str =
         name=f"start_place_{kind}_{source}_{dest}_{perception}",
         hide_proxy=source,
         stop_after=None,
+        target_id=starting_body(kind, source),
     )

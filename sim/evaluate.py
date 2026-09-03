@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
 from mj import DEBUG_DIR, Sim, load_config
-from pickup import run_pickup
+from episode import run_pickup
 from scenario import (
     COMP_DELTA_MM,
     NOM_GRASP_XY_MM,

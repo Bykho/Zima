@@ -7,11 +7,46 @@ import math
 FILES = "abcdefgh"
 
 
+def bowl_xyz(cfg: dict) -> list[float]:
+    """World XYZ for dropping captured pieces off the h-file."""
+    board = cfg.get("sim", {}).get("board", {})
+    raw = board.get("capture_bowl") or [0.35, -0.26, 0.024]
+    surface = float(board.get("surface_z", 0.02))
+    z = float(raw[2]) if len(raw) > 2 else surface
+    return [float(raw[0]), float(raw[1]), z]
+
+
+def nest_xyz(cfg: dict) -> list[float]:
+    """World XYZ of the reorient well (piece sitting height)."""
+    board = cfg.get("sim", {}).get("board", {})
+    raw = board.get("reorient_nest") or [0.22, -0.26, 0.024]
+    surface = float(board.get("surface_z", 0.02))
+    z = float(raw[2]) if len(raw) > 2 else surface
+    return [float(raw[0]), float(raw[1]), z]
+
+
 def parse_square(name: str) -> tuple[int, int]:
     name = name.strip().lower()
     if len(name) != 2 or name[0] not in FILES or name[1] not in "12345678":
         raise ValueError(f"Bad square '{name}'")
     return FILES.index(name[0]), int(name[1])
+
+
+def parse_move(text: str) -> tuple[str, str]:
+    """'e2 e4', 'e2e4', or 'e2-e4' → (src, dst). Squares only; no chess rules."""
+    raw = text.strip().lower().replace("-", " ").replace(",", " ")
+    parts = [p for p in raw.split() if p]
+    if len(parts) == 1 and len(parts[0]) == 4:
+        src, dst = parts[0][:2], parts[0][2:]
+    elif len(parts) == 2:
+        src, dst = parts[0], parts[1]
+    else:
+        raise ValueError(f"Bad move '{text}' (want e2 e4)")
+    parse_square(src)
+    parse_square(dst)
+    if src == dst:
+        raise ValueError(f"src and dst are both {src}")
+    return src, dst
 
 
 def square_to_xy(square: str, origin: list[float], square_size: float, yaw: float = 0.0) -> tuple[float, float]:

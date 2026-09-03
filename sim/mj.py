@@ -34,6 +34,11 @@ class Sim:
             xml_path = ROOT / xml_path
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
         self.data = mujoco.MjData(self.model)
+        from fast import clock_scale
+
+        clock = clock_scale()
+        if clock != 1.0:
+            self.model.opt.timestep = float(self.model.opt.timestep) * clock
         self.dt = float(self.model.opt.timestep)
         self._joint = {n: mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, n) for n in JOINT_NAMES}
         self._act = {n: mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, n) for n in JOINT_NAMES}
@@ -41,12 +46,68 @@ class Sim:
         self._depth_renderer: mujoco.Renderer | None = None
         self.on_step = None
         self.quiet = False
+        self.apply_arm_base()
+        self.apply_board_layout()
         mujoco.mj_resetData(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)
+        self._place_starting_men()
+
+    def apply_arm_base(self, pos=None) -> None:
+        """Put the SO-101 base at sim.arm_base_position (MJCF default is the origin)."""
+        if pos is None:
+            pos = self.cfg.get("sim", {}).get("arm_base_position", [0.0, 0.0, 0.0])
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "base")
+        if bid < 0:
+            return
+        self.model.body_pos[bid] = np.asarray(pos, dtype=np.float64)
+        mujoco.mj_forward(self.model, self.data)
+
+    def apply_board_layout(self) -> None:
+        """Match board geom and starting proxies to sim.board origin/square_size."""
+        board = self.cfg.get("sim", {}).get("board", {})
+        origin = [float(v) for v in board.get("origin", [0.16, -0.1165, 0.0])]
+        size = float(board.get("square_size", 0.040375))
+        half = 4.0 * size
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "board")
+        if bid >= 0:
+            self.model.body_pos[bid] = np.array([origin[0] + half, origin[1] + half, 0.01], dtype=np.float64)
+        gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "board")
+        if gid >= 0:
+            self.model.geom_size[gid, 0] = half
+            self.model.geom_size[gid, 1] = half
+        bowl = board.get("capture_bowl")
+        bid_bowl = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "capture_bowl")
+        if bid_bowl >= 0 and bowl:
+            self.model.body_pos[bid_bowl] = np.array(
+                [float(bowl[0]), float(bowl[1]), 0.01], dtype=np.float64
+            )
+        nest = board.get("reorient_nest")
+        bid_nest = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "reorient_nest")
+        if bid_nest >= 0 and nest:
+            self.model.body_pos[bid_nest] = np.array(
+                [float(nest[0]), float(nest[1]), 0.01], dtype=np.float64
+            )
+        mujoco.mj_forward(self.model, self.data)
+
+    def _place_starting_men(self) -> None:
+        """Put free pieces on config squares. Geom size is fixed in chessmen.xml."""
+        from scenario import STARTING_POSITION
+        from squares import square_to_world
+
+        board = self.cfg.get("sim", {}).get("board", {})
+        surface = float(board.get("surface_z", 0.02))
+        n = 0
+        for kind, sq in STARTING_POSITION:
+            xyz = square_to_world(sq, self.cfg, z=surface)
+            if self.place_object(f"{kind}_{sq}", xyz):
+                n += 1
+        if n == 0:
+            self.place_object("queen", square_to_world("d1", self.cfg, z=surface))
 
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)
+        self._place_starting_men()
         self.on_step = None
 
     def joint_limits(self) -> dict[str, tuple[float, float]]:
@@ -78,10 +139,18 @@ class Sim:
         self.set_ctrl(positions or self.qpos())
 
     def step(self, n: int = 1):
-        for _ in range(max(1, n)):
-            mujoco.mj_step(self.model, self.data)
-            if self.on_step is not None:
-                self.on_step()
+        n = max(1, int(n))
+        if n == 1 or self.on_step is not None:
+            for _ in range(n):
+                mujoco.mj_step(self.model, self.data)
+                if self.on_step is not None:
+                    self.on_step()
+            return
+        try:
+            mujoco.mj_step(self.model, self.data, nstep=n)
+        except TypeError:
+            for _ in range(n):
+                mujoco.mj_step(self.model, self.data)
 
     def site_pose(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, name)
@@ -132,21 +201,93 @@ class Sim:
         mujoco.mj_forward(self.model, self.data)
         return True
 
-    def contacts_with(self, body: str) -> list[dict]:
-        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body)
-        hits = []
-        for i in range(self.data.ncon):
-            c = self.data.contact[i]
-            b1 = self.model.geom_bodyid[c.geom1]
-            b2 = self.model.geom_bodyid[c.geom2]
-            if bid not in (b1, b2):
+    def tint_body(self, name: str, rgba) -> bool:
+        """Override geom materials so a reused free body can be white or black."""
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+        if bid < 0:
+            return False
+        color = np.asarray(rgba, dtype=np.float32)
+        if color.size == 3:
+            color = np.append(color, np.float32(1.0))
+        backup = getattr(self, "_geom_matid", None)
+        if backup is None:
+            backup = {}
+            self._geom_matid = backup
+        for gid in range(self.model.ngeom):
+            if int(self.model.geom_bodyid[gid]) != bid:
                 continue
-            force = np.zeros(6)
+            if gid not in backup:
+                backup[gid] = int(self.model.geom_matid[gid])
+            self.model.geom_matid[gid] = -1
+            self.model.geom_rgba[gid] = color
+        mujoco.mj_forward(self.model, self.data)
+        return True
+
+    def body_rgba(self, name: str) -> np.ndarray | None:
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+        if bid < 0:
+            return None
+        for gid in range(self.model.ngeom):
+            if int(self.model.geom_bodyid[gid]) == bid:
+                return np.asarray(self.model.geom_rgba[gid], dtype=np.float64).copy()
+        return None
+
+    def set_body_pos(self, name: str, xyz) -> bool:
+        """Move a static body (proxies) in the model."""
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+        if bid < 0:
+            return False
+        self.model.body_pos[bid] = np.asarray(xyz, dtype=np.float64)
+        mujoco.mj_forward(self.model, self.data)
+        return True
+
+    def body_model_pos(self, name: str) -> np.ndarray | None:
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+        if bid < 0:
+            return None
+        return np.asarray(self.model.body_pos[bid], dtype=np.float64).copy()
+
+    def body_id(self, name: str) -> int:
+        cache = self.__dict__.setdefault("_body_id_cache", {})
+        bid = cache.get(name)
+        if bid is None:
+            bid = int(mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name))
+            cache[name] = bid
+        return bid
+
+    def body_name(self, bid: int) -> str | None:
+        names = self.__dict__.get("_body_names")
+        if names is None:
+            names = [mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(self.model.nbody)]
+            self._body_names = names
+        return names[int(bid)]
+
+    def contact_bodies(self) -> tuple[np.ndarray, np.ndarray]:
+        """Body ids of both sides of every active contact (vectorized)."""
+        n = int(self.data.ncon)
+        if n == 0:
+            e = np.zeros(0, dtype=int)
+            return e, e
+        g1 = self.data.contact.geom1[:n]
+        g2 = self.data.contact.geom2[:n]
+        return self.model.geom_bodyid[g1], self.model.geom_bodyid[g2]
+
+    def contacts_with(self, body: str) -> list[dict]:
+        bid = self.body_id(body)
+        b1, b2 = self.contact_bodies()
+        idx = np.flatnonzero((b1 == bid) | (b2 == bid))
+        if idx.size == 0:
+            return []
+        hits = []
+        force = np.zeros(6)
+        for i in idx:
+            i = int(i)
+            c = self.data.contact[i]
             mujoco.mj_contactForce(self.model, self.data, i, force)
-            other = b2 if b1 == bid else b1
+            other = b2[i] if b1[i] == bid else b1[i]
             hits.append(
                 {
-                    "other": mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, int(other)),
+                    "other": self.body_name(other),
                     "dist": float(c.dist),
                     "force": float(np.linalg.norm(force[:3])),
                     "pos": c.pos.copy(),

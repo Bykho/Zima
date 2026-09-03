@@ -1,9 +1,7 @@
 """Pick and place for sim chess.
 
 Pick: contact on jaws → fixed constraint on gripper_link → linear carry.
-Place: detach, then snap piece to square center (calibrated placement).
-      Physics release kept knocking pieces off; snap is intentional for sim.
-      Real arm would use open-gripper release + same square frame.
+Place: detach and leave the piece where physics puts it.
 """
 
 from __future__ import annotations
@@ -31,12 +29,6 @@ def _board_cfg(cfg: dict) -> dict:
 
 def _pick_hover(cfg: dict) -> float:
     return _board_cfg(cfg).get("pick_hover", 0.09)
-
-
-def _snap_piece_to_square(body: int, square: str, cfg: dict, piece_type: str) -> list[float]:
-    pos = square_to_world(square, cfg, z=piece_center_z(cfg, piece_type))
-    p.resetBasePositionAndOrientation(body, pos, [0, 0, 0, 1])
-    return pos
 
 
 def pick_place(
@@ -82,14 +74,12 @@ def pick_place(
 
         detach(constraint_id)
         constraint_id = None
-        _snap_piece_to_square(body, to_sq, cfg, piece_type)
 
         pieces.remove(from_sq)
         pieces.place(to_sq, body, color, piece_type)
 
         open_gripper(arm, cfg, hold)
         ascend_from_grasp(arm, to_sq, cfg)
-        _snap_piece_to_square(body, to_sq, cfg, piece_type)
 
         return piece_near_square(pieces, body, to_sq, cfg)
     finally:

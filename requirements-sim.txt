@@ -3,3 +3,4 @@ pybullet
 pyyaml
 opencv-python
 numpy
+python-chess

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import Counter
@@ -18,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
 from mj import DEBUG_DIR, Sim, load_config
-from pickup import FULL_BOARD_XML, PIECES_XML, run_pickup
+from episode import run_pickup
+from pickup import FULL_BOARD_XML, PIECES_XML
 from scenario import (
     DEST_SQUARES,
     PIECE_BODIES,
@@ -61,6 +63,8 @@ KEEP = (
     "obstruction_robot_part",
     "obstruction_phase",
     "approach_plan",
+    "unstack",
+    "restack_ok",
 )
 
 
@@ -108,6 +112,12 @@ def _run_populated(cfg: dict, cases: list[dict], sim: Sim | None = None) -> list
                     f"  hit={row.get('obstruction_body')}"
                     f"/{row.get('obstruction_robot_part')}"
                 )
+            un = result.get("unstack") or []
+            if un:
+                moved = [f"{e.get('kind')}@{e.get('home')}->{e.get('park')}" for e in un if e.get("ok")]
+                obs += f"  unstack={moved or un}"
+            if result.get("restack_ok") is False:
+                obs += "  restack=FAIL"
             print(f"  [{i:3d}/{n}] {sc['name']:44s} {cat:16s} {row.get('failure_reason') or '-'}{obs}")
         sim.model.body_pos[:] = orig
         sim.reset()
@@ -115,6 +125,62 @@ def _run_populated(cfg: dict, cases: list[dict], sim: Sim | None = None) -> list
         if own:
             sim.close()
     return rows
+
+
+_WORKER: dict = {}
+
+
+def _worker_init(cfg: dict, xml: str) -> None:
+    _WORKER["cfg"] = cfg
+    _WORKER["xml"] = xml
+
+
+def _worker_run(task: tuple[int, dict, str]) -> tuple[int, dict, str]:
+    idx, sc, board = task
+    # Fresh Sim per episode (~0.1 s): episodes leave model-level state behind
+    # (tints, hidden proxies, per-kind caches), and a reused Sim made outcomes
+    # depend on which scenario ran before. Determinism matters more than 0.1 s.
+    sim = Sim(xml_path=_WORKER["xml"], cfg=_WORKER["cfg"])
+    sim.quiet = True
+    try:
+        result = run_pickup(sim, _WORKER["cfg"], scenario=sc)
+    except Exception as exc:  # a crash in one episode must not kill the sweep
+        result = {"failure_reason": f"EXCEPTION:{type(exc).__name__}", "failure_category": "CRASH"}
+    finally:
+        sim.close()
+    row = _row(result, board)
+    un = result.get("unstack") or []
+    obs = ""
+    if not row.get("pickup_success") and row.get("obstruction_body"):
+        obs = f"  hit={row.get('obstruction_body')}/{row.get('obstruction_robot_part')}"
+    if un:
+        moved = [f"{e.get('kind')}@{e.get('home')}->{e.get('park')}" for e in un if e.get("ok")]
+        obs += f"  unstack={moved or un}"
+    if result.get("restack_ok") is False:
+        obs += "  restack=FAIL"
+    cat = row.get("failure_category") or "OK"
+    line = f"{sc['name']:44s} {cat:16s} {row.get('failure_reason') or '-'}{obs}"
+    return idx, row, line
+
+
+def _run_parallel(cfg: dict, cases: list[dict], xml, board: str, jobs: int) -> list[dict]:
+    """Same rows as _run_populated, fanned out over `jobs` processes (one Sim each)."""
+    import multiprocessing as mp
+
+    if not cases:
+        return []
+    jobs = max(1, min(int(jobs), len(cases)))
+    tasks = [(i, sc, board) for i, sc in enumerate(cases)]
+    out: list[dict | None] = [None] * len(cases)
+    n = len(cases)
+    done = 0
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(jobs, initializer=_worker_init, initargs=(cfg, str(xml))) as pool:
+        for idx, row, line in pool.imap_unordered(_worker_run, tasks):
+            done += 1
+            out[idx] = row
+            print(f"  [{done:3d}/{n}] {line}", flush=True)
+    return [r for r in out if r is not None]
 
 
 def _rate(rows: list[dict], key: str) -> str:
@@ -382,6 +448,9 @@ def summarize_starting(rows: list[dict]) -> str:
         f"PICKUP+LIFT VISION: {_rate(vis, 'pickup_success')}",
         f"PLACE (among follow-ups): {_rate(places, 'placement_success')}",
         f"FULL PLACE EPISODE: {_rate(places, 'success')}",
+        f"UNSTACK ATTEMPTED:  {sum(1 for r in picks if r.get('unstack'))}/{len(picks)}",
+        f"UNSTACK MOVED:      {sum(1 for r in picks if any(e.get('ok') for e in (r.get('unstack') or [])))}/{len(picks)}",
+        f"RESTACK FAIL:       {sum(1 for r in picks if r.get('restack_ok') is False)}",
         "",
         _fmt_chess_map(gt_map, "STARTING PICKUP MAP — GT"),
         "",
@@ -445,8 +514,10 @@ def _save(path: Path, rows: list[dict], text: str):
     path.with_suffix(".txt").write_text(text + "\n")
 
 
-def run_starting(cfg: dict, quick: bool = False, pickup_only: bool = False) -> list[dict]:
+def run_starting(cfg: dict, quick: bool = False, pickup_only: bool = False, jobs: int = 1) -> list[dict]:
     rows: list[dict] = []
+    if jobs > 1:
+        return _run_starting_parallel(cfg, quick=quick, pickup_only=pickup_only, jobs=jobs)
     if quick:
         from scenario import piece_scenario
 
@@ -494,6 +565,58 @@ def run_starting(cfg: dict, quick: bool = False, pickup_only: bool = False) -> l
             rows.extend(_run_populated(cfg, place_cases, sim=sim))
     finally:
         sim.close()
+    return rows
+
+
+def _starting_cases(quick: bool) -> tuple[list[dict], list[dict]]:
+    if quick:
+        from scenario import piece_scenario
+
+        pick_gt = [
+            piece_scenario("queen", "d1", "d4", "gt", hide_proxy="d1", stop_after="lift", quiet=True),
+            piece_scenario("pawn", "a2", "d4", "gt", hide_proxy="a2", stop_after="lift", quiet=True),
+            piece_scenario("king", "e1", "d4", "gt", hide_proxy="e1", stop_after="lift", quiet=True),
+        ]
+        pick_vis = [
+            piece_scenario("queen", "d1", "d4", "vision", hide_proxy="d1", stop_after="lift", quiet=True),
+        ]
+        return pick_gt, pick_vis
+    return starting_pickup_scenarios("gt"), starting_pickup_scenarios("vision")
+
+
+def _place_followups(rows: list[dict], quick: bool) -> list[dict]:
+    ok_keys = {
+        (r.get("piece"), r.get("source"), r.get("perception"))
+        for r in _pick_rows(rows)
+        if r.get("pickup_success")
+    }
+    dests = ("d4",) if quick else STARTING_DESTS
+    seen = set()
+    cases = []
+    for piece, src, perc in sorted(ok_keys, key=lambda t: (t[2], t[1] or "")):
+        for dest in dests:
+            key = (piece, src, perc, dest)
+            if key in seen:
+                continue
+            seen.add(key)
+            cases.append(starting_place_scenario(piece, src, dest, perc))
+    return cases
+
+
+def _run_starting_parallel(cfg: dict, quick: bool, pickup_only: bool, jobs: int) -> list[dict]:
+    rows: list[dict] = []
+    pick_gt, pick_vis = _starting_cases(quick)
+    print(f"\n=== starting pickup GT ({len(pick_gt)}) x{jobs} ===")
+    rows.extend(_run_parallel(cfg, pick_gt, FULL_BOARD_XML, "full", jobs))
+    _save(OUT / "starting.json", rows, summarize_starting(rows))
+    print(f"\n=== starting pickup vision ({len(pick_vis)}) x{jobs} ===")
+    rows.extend(_run_parallel(cfg, pick_vis, FULL_BOARD_XML, "full", jobs))
+    _save(OUT / "starting.json", rows, summarize_starting(rows))
+    if not pickup_only:
+        place_cases = _place_followups(rows, quick)
+        if place_cases:
+            print(f"\n=== starting place follow-up ({len(place_cases)}) x{jobs} ===")
+            rows.extend(_run_parallel(cfg, place_cases, FULL_BOARD_XML, "full", jobs))
     return rows
 
 
@@ -545,6 +668,11 @@ def main():
     parser.add_argument("--quick", action="store_true", help="tiny smoke of the selected study")
     parser.add_argument("--matrix", action="store_true", help="legacy empty-board piece×square matrix")
     parser.add_argument("--pickup-only", action="store_true", help="starting study: skip place follow-ups")
+    parser.add_argument(
+        "--jobs", "-j", type=int, default=max(1, min(8, (os.cpu_count() or 2) - 2)),
+        help="worker processes for the starting study (1 = in-process, serial)",
+    )
+    parser.add_argument("--tag", default=None, help="also save results as eval/starting_<tag>.{json,txt}")
     args = parser.parse_args()
     cfg = load_config()
     OUT.mkdir(parents=True, exist_ok=True)
@@ -555,10 +683,12 @@ def main():
         _save(OUT / "matrix.json", rows, text)
         out = OUT / "matrix.txt"
     else:
-        rows = run_starting(cfg, quick=args.quick, pickup_only=args.pickup_only)
+        rows = run_starting(cfg, quick=args.quick, pickup_only=args.pickup_only, jobs=args.jobs)
         text = summarize_starting(rows)
         _save(OUT / "starting.json", rows, text)
         out = OUT / "starting.txt"
+        if args.tag:
+            _save(OUT / f"starting_{args.tag}.json", rows, text)
     print("\n" + text)
     print(f"\nwrote {out}  ({time.time() - t0:.1f}s, {len(rows)} episodes)")
 
