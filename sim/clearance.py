@@ -158,15 +158,39 @@ def apply_approach_gripper(sim, hover_xyz, gripper: float) -> bool:
 
 # Clutter-aware approach: small candidate set around the existing grasp.
 # Grasp XY is frozen. No camera, no RRT. Wrist-roll + aperture only.
-APPROACH_BODIES = ("gripper", "moving_jaw_so101_v1", "camera_mount", "wrist")
+APPROACH_BODIES = ("gripper", "moving_jaw_so101_v1", "camera_mount", "wrist", "lower_arm")
 PALM_BODIES = ("gripper", "camera_mount", "wrist")
+JAW_ONLY_BODIES = ("gripper", "moving_jaw_so101_v1")
 _ROLL_GRID_RAD = 0.35
-_DESCEND_U = (0.30, 0.55, 0.80)
-_APPROACH_MARGIN = 0.0005
-# Kinematic 0.5 mm still physics-clips on locked-wrist +Z (palm vs neighbor).
-_EXTRACT_MARGIN = 0.005
+# Whole descend, grasp point included. The old (0.30, 0.55, 0.80) stopped
+# short of the grasp, so a moving jaw that ended 3 mm inside the neighbor
+# passed as "clear" and knocked it over on every 7th-rank pawn.
+_DESCEND_U = tuple(round(0.1 * i, 2) for i in range(1, 11))
+# Kinematic clearance the plan must keep to every bystander along the
+# approach. Covers ctrl tracking error (~1-2 mm) plus close-range perception
+# error (~1-3 mm). Overridable via sim.pickup.approach_margin_mm.
+_APPROACH_MARGIN = 0.003
+# The jaws straddle the target on the way down. A kinematic brush of up to
+# 2 mm against the target's head is harmless (the pinch closes on it right
+# after); a jaw landing on top of the piece shows up as several mm of
+# interference and is rejected.
+_TARGET_MARGIN = -0.002
+# Below this the approach is a physical hit, not a close pass: never chosen.
+HARD_MARGIN = 0.0005
+_HARD_MARGIN = HARD_MARGIN
+# Floor for the extract (lift) margin; the approach margin applies if larger.
+_EXTRACT_MARGIN = 0.002
 _MIN_APPROACH_G = 0.12
+# Aperture ladder tried per roll, widest first. Open jaws span ~63 mm at 0.6
+# while squares are 37.5 mm, so the moving jaw reaches into the neighbor
+# along the pinch axis unless the roll points it at an empty square or the
+# aperture comes down to ~40 mm.
+_APERTURE_LADDER = (0.6, 0.42, 0.30, 0.20)
 _PRE_OFFSET_SCALE = 0.55
+# Bystanders farther than this from the grasp cannot be reached by the
+# gripper/wrist envelope during approach; skipping them keeps the dense
+# check cheap.
+_NEAR_R_M = 0.13
 
 
 # --- transport: lift above the board envelope, then translate in XY ---
@@ -333,45 +357,247 @@ def safe_transit_ee_z(sim, ee_z: float, target_id: str, obstacles: list[str], ma
     }
 
 
-def _min_gap(sim, a_bodies: tuple[str, ...], b_bodies: list[str]) -> float:
+def _local_aabb(sim, gid: int) -> tuple[np.ndarray, np.ndarray]:
+    """(centre, half-extents) of a geom's AABB in its own frame. Cached."""
     import mujoco
 
+    cache = sim.__dict__.setdefault("_local_aabb_cache", {})
+    hit = cache.get(gid)
+    if hit is not None:
+        return hit
+    m = sim.model
+    t = int(m.geom_type[gid])
+    sz = np.asarray(m.geom_size[gid], dtype=float)
+    G = mujoco.mjtGeom
+    if t == G.mjGEOM_MESH:
+        mid = int(m.geom_dataid[gid])
+        adr, n = int(m.mesh_vertadr[mid]), int(m.mesh_vertnum[mid])
+        v = np.asarray(m.mesh_vert[adr : adr + n], dtype=float).reshape(-1, 3)
+        lo, hi = v.min(0), v.max(0)
+        out = (0.5 * (lo + hi), 0.5 * (hi - lo))
+    elif t == G.mjGEOM_BOX:
+        out = (np.zeros(3), sz.copy())
+    elif t in (G.mjGEOM_CAPSULE, G.mjGEOM_CYLINDER):
+        r, h = float(sz[0]), float(sz[1])
+        out = (np.zeros(3), np.array([r, r, h + (r if t == G.mjGEOM_CAPSULE else 0.0)]))
+    else:
+        r = float(m.geom_rbound[gid])
+        out = (np.zeros(3), np.array([r, r, r]))
+    cache[gid] = out
+    return out
+
+
+def _local_aabb_arrays(sim) -> tuple[np.ndarray, np.ndarray]:
+    """Local AABB (centre, half) for every geom, as (ngeom,3) arrays. Cached."""
+    hit = sim.__dict__.get("_local_aabb_arrays")
+    if hit is not None:
+        return hit
+    n = int(sim.model.ngeom)
+    c = np.zeros((n, 3))
+    h = np.zeros((n, 3))
+    for g in range(n):
+        c[g], h[g] = _local_aabb(sim, g)
+    sim._local_aabb_arrays = (c, h)
+    return c, h
+
+
+def _world_aabbs(sim, gids: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """World AABB (centre, half-extents) of the given geoms, vectorized."""
+    c, h = _local_aabb_arrays(sim)
+    R = np.asarray(sim.data.geom_xmat[gids], dtype=float).reshape(-1, 3, 3)
+    p = np.asarray(sim.data.geom_xpos[gids], dtype=float) + np.einsum("nij,nj->ni", R, c[gids])
+    e = np.einsum("nij,nj->ni", np.abs(R), h[gids])
+    return p, e
+
+
+def _aabb_gap_matrix(sim, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """(len(a), len(b)) matrix of world-AABB gaps: lower bounds on geom distance."""
+    pa, ea = _world_aabbs(sim, a)
+    pb, eb = _world_aabbs(sim, b)
+    sep = np.abs(pa[:, None, :] - pb[None, :, :]) - ea[:, None, :] - eb[None, :, :]
+    np.maximum(sep, 0.0, out=sep)
+    return np.linalg.norm(sep, axis=2)
+
+
+def _aabb_gap(sim, i: int, j: int) -> float:
+    """Gap between the world AABBs of two geoms: a valid lower bound on their distance."""
+    return float(_aabb_gap_matrix(sim, np.array([i]), np.array([j]))[0, 0])
+
+
+def _geom_hull_points(sim, gid: int) -> np.ndarray | None:
+    """World-frame vertex cloud whose convex hull is the geom (box, mesh). Cached locally."""
+    import mujoco
+
+    m = sim.model
+    t = int(m.geom_type[gid])
+    cache = sim.__dict__.setdefault("_hull_local_cache", {})
+    loc = cache.get(gid)
+    if loc is None:
+        if t == int(mujoco.mjtGeom.mjGEOM_BOX):
+            s = np.asarray(m.geom_size[gid], dtype=float)
+            loc = np.array([[sx, sy, sz] for sx in (-s[0], s[0]) for sy in (-s[1], s[1]) for sz in (-s[2], s[2])])
+        elif t == int(mujoco.mjtGeom.mjGEOM_MESH):
+            mid = int(m.geom_dataid[gid])
+            adr, n = int(m.mesh_vertadr[mid]), int(m.mesh_vertnum[mid])
+            loc = np.asarray(m.mesh_vert[adr : adr + n], dtype=float).reshape(-1, 3)
+        else:
+            loc = False
+        cache[gid] = loc
+    if loc is False:
+        return None
+    R = np.asarray(sim.data.geom_xmat[gid], dtype=float).reshape(3, 3)
+    return loc @ R.T + np.asarray(sim.data.geom_xpos[gid], dtype=float)
+
+
+def _simplex_closest(W: list[np.ndarray]) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Closest point to the origin on the simplex conv(W) (|W| <= 4) and its supporting face."""
+    best = None
+    n = len(W)
+    for mask in range(1, 1 << n):
+        idx = [k for k in range(n) if mask >> k & 1]
+        P = np.asarray([W[k] for k in idx])
+        if len(idx) == 1:
+            lam = np.array([1.0])
+        else:
+            # min ||P^T lam|| s.t. sum lam = 1  ->  KKT system
+            G = P @ P.T
+            A = np.zeros((len(idx) + 1, len(idx) + 1))
+            A[:-1, :-1] = 2.0 * G
+            A[:-1, -1] = 1.0
+            A[-1, :-1] = 1.0
+            rhs = np.zeros(len(idx) + 1)
+            rhs[-1] = 1.0
+            try:
+                lam = np.linalg.solve(A, rhs)[:-1]
+            except np.linalg.LinAlgError:
+                continue
+            if np.any(lam < -1e-9):
+                continue
+        v = lam @ P
+        d = float(v @ v)
+        if best is None or d < best[0] - 1e-15:
+            best = (d, v, [W[k] for k in idx])
+    return best[1], best[2]
+
+
+def gjk_distance(A: np.ndarray, B: np.ndarray, tol: float = 1e-6, max_iter: int = 64) -> float:
+    """Distance between conv(A) and conv(B) (0 when they intersect). Plain GJK."""
+    def support(d):
+        return A[int(np.argmax(A @ d))] - B[int(np.argmax(B @ (-d)))]
+
+    v = support(np.array([1.0, 0.0, 0.0]))
+    W = [v]
+    dist = float(np.linalg.norm(v))
+    for _ in range(max_iter):
+        if dist < tol:
+            return 0.0
+        w = support(-v)
+        if dist * dist - float(v @ w) <= tol * dist:
+            return dist
+        W.append(w)
+        v, W = _simplex_closest(W)
+        dist = float(np.linalg.norm(v))
+        if len(W) == 4:
+            return 0.0
+    return dist
+
+
+def _exact_or_raw(sim, i: int, j: int, d: float) -> float:
+    """mj_geomDistance returns exactly 0 for some separated box/mesh pairs.
+
+    Only the box-box special collider and the convex (mesh) path glitch this
+    way; primitives pairs are fine. Recompute those with GJK on the hulls.
+    """
+    if d != 0.0:
+        return d
+    A = _geom_hull_points(sim, i)
+    B = _geom_hull_points(sim, j)
+    if A is None or B is None:
+        return d
+    return float(gjk_distance(A, B))
+
+
+def _pair_gap(sim, i: int, j: int, fromto) -> float:
+    """Signed geom distance, guarded against collider glitches.
+
+    mj_geomDistance returns exactly 0 for some separated box-box and
+    mesh-box pairs (knight/king collision boxes vs gripper). The true
+    distance can never be below the gap between the two world AABBs, so a
+    value under that bound is bogus and is replaced by the bound
+    (conservative, still valid). One bogus 0 would otherwise turn a clear
+    approach into a "collision" and burn the candidate.
+    """
+    import mujoco
+
+    d = float(mujoco.mj_geomDistance(sim.model, sim.data, i, j, 0.20, fromto))
+    if d >= 0.20 - 1e-9:
+        return d
+    d = _exact_or_raw(sim, i, j, d)
+    lb = _aabb_gap(sim, i, j)
+    if lb > 1e-4 and d < lb - 1e-4:
+        return lb
+    return d
+
+
+def _geoms_of(sim, bodies) -> tuple[np.ndarray, list[str]]:
+    gids: list[int] = []
+    owner: list[str] = []
+    for name in bodies:
+        for g in _collision_geoms(sim, name):
+            gids.append(g)
+            owner.append(name)
+    return np.asarray(gids, dtype=int), owner
+
+
+def _nearest(sim, a_bodies, b_bodies, cap: float = 1.0) -> tuple[float, int, int]:
+    """(min signed distance, a_geom, b_geom) with an AABB broadphase.
+
+    AABB gap is a lower bound on the exact distance, so pairs whose gap is
+    already above the best exact distance found so far cannot improve it and
+    are skipped. Pairs are visited in ascending AABB-gap order, so on a
+    crowded board only a handful of exact queries run per pose.
+    """
+    import mujoco
+
+    a, _ = _geoms_of(sim, a_bodies)
+    b, _ = _geoms_of(sim, b_bodies)
+    if a.size == 0 or b.size == 0:
+        return cap, -1, -1
+    gaps = _aabb_gap_matrix(sim, a, b)
+    order = np.argsort(gaps, axis=None)
     fromto = np.zeros(6)
-    best = 1.0
-    a_geoms: list[int] = []
-    for name in a_bodies:
-        a_geoms.extend(_collision_geoms(sim, name))
-    for other in b_bodies:
-        b_geoms = _collision_geoms(sim, other)
-        for i in a_geoms:
-            for j in b_geoms:
-                d = mujoco.mj_geomDistance(sim.model, sim.data, i, j, 0.20, fromto)
-                if d < best:
-                    best = d
-    return float(best)
+    best = float(cap)
+    bi = bj = -1
+    flat = gaps.ravel()
+    nb = b.size
+    for k in order:
+        lb = float(flat[k])
+        # Once penetrating, still visit every zero-gap pair for the deepest hit.
+        if lb > max(best, 0.0):
+            break
+        i, j = int(a[k // nb]), int(b[k % nb])
+        d = float(mujoco.mj_geomDistance(sim.model, sim.data, i, j, 0.20, fromto))
+        d = _exact_or_raw(sim, i, j, d)
+        if lb > 1e-4 and d < lb - 1e-4:
+            d = lb  # still bogus: the AABB bound is a valid distance floor
+        if d < best:
+            best, bi, bj = d, i, j
+    return best, bi, bj
+
+
+def _min_gap(sim, a_bodies: tuple[str, ...], b_bodies: list[str]) -> float:
+    return float(_nearest(sim, a_bodies, b_bodies)[0])
 
 
 def closest_pair(sim, a_bodies, b_bodies) -> dict | None:
     """Nearest (a_body, b_body) pair by geom distance. Diagnostics only."""
-    import mujoco
-
-    fromto = np.zeros(6)
-    best = 1.0
-    pair = None
-    for a in a_bodies:
-        for i in _collision_geoms(sim, a):
-            for b in b_bodies:
-                for j in _collision_geoms(sim, b):
-                    d = mujoco.mj_geomDistance(sim.model, sim.data, i, j, 0.20, fromto)
-                    if d < best:
-                        best = d
-                        pair = (a, b, float(d))
-    if pair is None:
+    d, i, j = _nearest(sim, a_bodies, b_bodies)
+    if i < 0:
         return None
     return {
-        "robot": pair[0],
-        "body": pair[1],
-        "clearance_mm": round(pair[2] * 1000.0, 2),
+        "robot": sim.body_name(int(sim.model.geom_bodyid[i])),
+        "body": sim.body_name(int(sim.model.geom_bodyid[j])),
+        "clearance_mm": round(d * 1000.0, 2),
     }
 
 
@@ -454,7 +680,18 @@ def _pose_for_candidate(
     return False, lock
 
 
-_LEVEL_PADS_TILT_DEG = 8.0
+_LEVEL_PADS_TILT_DEG = 3.0
+
+
+def _grasp_tilt_deg(sim, grasp, roll: float) -> float:
+    """Gripper +X tilt from world-down at the grasp with `roll` locked (0 if unreachable)."""
+    q = sim.qpos()
+    q["wrist_roll"] = float(roll)
+    sim.set_qpos(q, hold=True)
+    if not solve_ik_down(sim, grasp, lock_joints=("wrist_roll",)):
+        return 0.0
+    _, R = sim.site_pose("gripperframe")
+    return float(np.degrees(np.arccos(np.clip(-R[2, 0], -1.0, 1.0))))
 
 
 def _level_pads_roll(sim, grasp, base_roll: float) -> float:
@@ -594,6 +831,9 @@ def _extract_clear(
     Jaws are allowed to occupy the source column at grasp. Extract flags
     palm/wrist/camera vs a neighbor — the locked-wrist lift clip.
     """
+    # Same margin as the approach: the z=0 sample *is* the grasp pose, so a
+    # stricter extract margin would veto approaches the descend check passed.
+    margin = max(approach_margin_m(cfg), _EXTRACT_MARGIN)
     for xyz in _extract_xyzs(grasp, cfg):
         ok = (
             solve_ik_down(sim, xyz, lock_joints=extract_lock)
@@ -602,9 +842,64 @@ def _extract_clear(
         )
         if not ok:
             return "ik"
-        if _min_gap(sim, PALM_BODIES, neighbors) < _EXTRACT_MARGIN:
+        if _min_gap(sim, PALM_BODIES, neighbors) < margin:
             return "extract"
     return None
+
+
+def approach_margin_m(cfg: dict | None) -> float:
+    mm = (cfg or {}).get("sim", {}).get("pickup", {}).get("approach_margin_mm")
+    return _APPROACH_MARGIN if mm is None else float(mm) / 1000.0
+
+
+def near_bodies(sim, bodies: list[str], xy, radius: float = _NEAR_R_M) -> list[str]:
+    """Subset of `bodies` whose origin lies within `radius` (XY) of `xy`."""
+    import mujoco
+
+    xy = np.asarray(xy, dtype=float)[:2]
+    out = []
+    for name in bodies:
+        bid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, name)
+        if bid < 0:
+            continue
+        if float(np.linalg.norm(np.asarray(sim.data.xpos[bid][:2]) - xy)) <= radius:
+            out.append(name)
+    return out
+
+
+_CLOSE_SWEEP_STEP = 0.06
+# Sweep past the estimated stem by this much: the real piece may sit that far
+# from the perception estimate, so the jaw may travel that much further.
+_CLOSE_SWEEP_OVERSHOOT_M = 0.006
+
+
+def _close_sweep_gap(sim, open_g: float, neighbors: list[str], tgt: list[str]) -> float:
+    """Min bystander gap while the moving jaw closes from open_g onto the target.
+
+    Arm pose is left as it is (the grasp pose); only the gripper joint moves.
+    Restores the aperture afterwards.
+    """
+    if not neighbors:
+        return 1.0
+    q = sim.qpos()
+    g0 = float(q["gripper"])
+    lo = float(sim.joint_limits()["gripper"][0])
+    worst = 1.0
+    g = float(open_g)
+    try:
+        while g > lo:
+            g = max(lo, g - _CLOSE_SWEEP_STEP)
+            q["gripper"] = g
+            sim.set_qpos(q, hold=True)
+            worst = min(worst, _min_gap(sim, ("moving_jaw_so101_v1",), neighbors))
+            if worst < _HARD_MARGIN:
+                break
+            if tgt and _min_gap(sim, ("moving_jaw_so101_v1",), tgt) < -_CLOSE_SWEEP_OVERSHOOT_M:
+                break
+    finally:
+        q["gripper"] = g0
+        sim.set_qpos(q, hold=True)
+    return float(worst)
 
 
 def _candidate_clear(
@@ -616,41 +911,84 @@ def _candidate_clear(
     roll: float | None,
     cfg: dict | None = None,
     require_extract: bool = True,
-) -> str:
-    """'ok', 'ik', 'collision', or 'extract'. Grasp XY is not tested (jaws must enter).
+    target: str | None = None,
+    margin: float | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    """'ok', 'ik', 'collision', 'target' or 'extract' for one (pre, roll, aperture).
 
-    Descend uses the approach roll lock. Extract uses that same candidate's
-    lift lock (flex+roll) and a wider margin — palm vs a neighbor column is
-    a lift hit. A different roll is allowed when it extracts under its own
-    lock; the live lift holds that roll after close.
+    Every point of the approach — transit to pre, the whole descend and the
+    grasp pose itself — must keep `margin` from every bystander with the
+    gripper, moving jaw, camera, wrist and forearm. The jaws must also not
+    land on the target on the way down (they close on it afterwards).
+
+    Extract uses the candidate's lift lock (flex+roll) and a wider margin —
+    palm vs a neighbor column is a lift hit.
+
+    Sets sim._cand_min_gap to the smallest bystander gap seen along the
+    path of the returned family (for the near-miss fallback).
     """
+    margin = approach_margin_m(cfg) if margin is None else float(margin)
     here, _ = sim.site_pose("gripperframe")
     start = sim.qpos()
     pre = np.asarray(pre, dtype=float)
     grasp = np.asarray(grasp, dtype=float)
-    path = [here + (pre - here) * u for u in (0.4, 0.8)]
-    path.extend(pre + (grasp - pre) * float(u) for u in _DESCEND_U)
+    transit = [here + (pre - here) * u for u in (0.4, 0.8)]
+    descend = [pre + (grasp - pre) * float(u) for u in _DESCEND_U]
+    tgt = [target] if target else []
     last = "ik"
     used_lock: tuple[str, ...] = ()
+    sim._cand_min_gap = None
+    sim._cand_path = None
+    best_gap = None
+    best_lock: tuple[str, ...] = ()
+    best_path: list[dict] | None = None
     for lock_flex in (True, False):
         sim.set_qpos(start, hold=True)
         ok, lock = _pose_for_candidate(sim, pre, gripper, roll, lock_flex)
         if not ok:
             continue
         used_lock = lock
-        descend_hit = neighbor_approach_gap(sim, neighbors) < _APPROACH_MARGIN
-        path_ok = True
-        for xyz in path:
+        status = "ok"
+        worst = neighbor_approach_gap(sim, neighbors)
+        for xyz in transit:
             if not _solve_path_point(sim, xyz, lock, lock_flex):
-                path_ok = False
+                status = "ik"
                 break
-            if neighbor_approach_gap(sim, neighbors) < _APPROACH_MARGIN:
-                descend_hit = True
-        if not path_ok:
+            worst = min(worst, neighbor_approach_gap(sim, neighbors))
+        if status == "ik":
             last = "ik"
             continue
-        if not _solve_path_point(sim, grasp, lock, lock_flex):
+        # The verified joint path, pre first. Execution replays exactly these
+        # configurations: re-solving IK online from a different seed lands on
+        # a different elbow/tilt compromise where the wrist cannot be vertical
+        # (g/h files), and that put the palm over a neighbor the plan never saw.
+        sim.set_qpos(start, hold=True)
+        _pose_for_candidate(sim, pre, gripper, roll, lock_flex)
+        path_q: list[dict] = [sim.qpos()]
+        for xyz in descend:
+            if not _solve_path_point(sim, xyz, lock, lock_flex):
+                status = "ik"
+                break
+            path_q.append(sim.qpos())
+            worst = min(worst, neighbor_approach_gap(sim, neighbors))
+            if worst < _HARD_MARGIN:
+                break  # physical hit: cannot be chosen even as a fallback
+            if tgt and _min_gap(sim, JAW_ONLY_BODIES, tgt) < _TARGET_MARGIN:
+                status = "target"
+                break
+        if status == "ik":
             last = "ik"
+            continue
+        if status != "target" and worst >= _HARD_MARGIN:
+            # Close sweep: at the grasp pose the moving jaw swings through
+            # everything between the open aperture and the piece. Walk the
+            # aperture down until the pad is well into the (estimated) target
+            # and keep the bystander gap along the way.
+            worst = min(worst, _close_sweep_gap(sim, gripper, neighbors, tgt))
+        if status == "ok" and worst < margin:
+            status = "collision"
+        if status == "target":
+            last = status
             continue
         if require_extract:
             # Live lift is vertical (down=True, roll lock only) with a
@@ -663,10 +1001,19 @@ def _candidate_clear(
             if hit:
                 last = hit
                 continue
-        if descend_hit:
-            last = "collision"
-            continue
-        return "ok", used_lock
+        if status == "ok":
+            sim._cand_min_gap = float(worst)
+            sim._cand_path = path_q
+            return "ok", used_lock
+        # collision: remember the widest near-miss, keep looking in the other
+        # lock family for a clean one
+        last = status
+        if best_gap is None or worst > best_gap:
+            best_gap, best_lock, best_path = float(worst), lock, path_q
+    if last == "collision":
+        sim._cand_min_gap = best_gap
+        sim._cand_path = best_path
+        return last, best_lock
     return last, used_lock
 
 
@@ -683,6 +1030,9 @@ def plan_approach(
     force_roll: float | None = None,
     lock_roll: bool = False,
     grasp_for_roll=None,
+    target: str | None = None,
+    exclude: list[dict] | None = None,
+    margin: float | None = None,
 ) -> dict:
     """First collision-free reachable approach around the frozen grasp XY.
 
@@ -694,6 +1044,10 @@ def plan_approach(
     start = sim.qpos()
     pre0 = np.asarray(pre, dtype=float)
     grasp = np.asarray(grasp, dtype=float)
+    # Only bystanders the gripper envelope can actually reach during the
+    # approach; the far side of the board is irrelevant and costs time.
+    all_neighbors = list(neighbors)
+    neighbors = near_bodies(sim, all_neighbors, grasp[:2]) if neighbors else []
 
     def restore():
         sim.set_qpos(start, hold=True)
@@ -702,17 +1056,17 @@ def plan_approach(
         return [float(pre0[0] + dx), float(pre0[1] + dy), float(pre0[2])]
 
     occ: dict[str, str] = {}
-    narrow = None
     if neighbors and source and cfg is not None:
         occ = occupied_neighbor_bodies(sim, cfg, source, scenario)
-        sweep = finger_sweep_bodies(sim, cfg, source, occ) if occ else []
-        if sweep:
-            restore()
-            narrow = choose_approach_gripper(sim, grasp, sweep, open_g, min_g=_MIN_APPROACH_G)
-            restore()
+    # Aperture is a search dimension, widest first: the wide jaw is the most
+    # forgiving grasp, but on a crowded board it reaches into the next square
+    # along the pinch axis, so each roll is retried narrower before moving on.
     grippers = [float(open_g)]
-    if narrow is not None and abs(float(narrow) - float(open_g)) > 0.02:
-        grippers.append(float(narrow))
+    if neighbors:
+        for g in _APERTURE_LADDER:
+            g = float(min(g, open_g))
+            if g >= _MIN_APPROACH_G and all(abs(g - x) > 0.05 for x in grippers):
+                grippers.append(g)
     xy_list = approach_xy_offsets(source, occ, cfg) if neighbors else [(0.0, 0.0)]
 
     restore()
@@ -738,15 +1092,36 @@ def plan_approach(
     # grid over the joint range instead, ordered by distance from the natural
     # roll; the pad-leveling roll goes first when the pinch cannot be vertical.
     rolls: list[float] = []
-    if abs(level_roll - base_roll) > 0.1:
-        rolls.append(level_roll)
-    rolls.append(base_roll)
     lo, hi = sim.joint_limits()["wrist_roll"]
+    tilt_deg = _grasp_tilt_deg(sim, grasp, base_roll)
+    restore()
+    # Pinch tilt for a roll r is asin(sin(tilt) * sin(r - level)). When the
+    # wrist cannot point down (g/h files, rank 7: 6-30 deg) a roll picked for
+    # clearance alone tips the piece on close and it hangs crooked through
+    # the carry, so order rolls by that cost first: the leveling roll and its
+    # 180 deg flip (moving jaw on the other side) before anything else.
+    if tilt_deg >= 3.0:
+        for r in (level_roll, level_roll + np.pi, level_roll - np.pi):
+            if lo + 0.02 <= r <= hi - 0.02 and all(abs(r - x) > 0.15 for x in rolls):
+                rolls.append(float(r))
+
+        def _key(v: float):
+            pinch = tilt_deg * abs(np.sin(float(v) - level_roll))
+            return (round(pinch / 2.0), abs(float(v) - base_roll))
+    else:
+
+        def _key(v: float):
+            return (0, abs(float(v) - base_roll))
+
+    if all(abs(base_roll - x) > 0.15 for x in rolls):
+        rolls.append(base_roll)
     grid = np.arange(lo + 0.05, hi - 0.05 + 1e-9, _ROLL_GRID_RAD)
-    for r in sorted(grid, key=lambda v: abs(float(v) - base_roll)):
+    for r in sorted(grid, key=_key):
         r = float(r)
         if all(abs(r - x) > 0.15 for x in rolls):
             rolls.append(r)
+    if tilt_deg >= 3.0:
+        rolls = sorted(rolls, key=_key)
     roll_cands: list[tuple[int, float | None, float]] = []
     rank = 0
     for roll in rolls:
@@ -793,7 +1168,9 @@ def plan_approach(
 
     first_block = None
     extract_block = None
+    near_miss: dict | None = None
     grasp_cache: dict[float | None, np.ndarray] = {}
+    status_count: dict[str, int] = {}
 
     def grasp_at(roll: float | None) -> np.ndarray:
         if grasp_for_roll is None:
@@ -804,14 +1181,42 @@ def plan_approach(
             grasp_cache[key] = np.asarray(grasp_for_roll(roll), dtype=float)
         return grasp_cache[key]
 
+    def _excluded(roll, gripper, dx, dy) -> bool:
+        for ex in exclude or ():
+            er = ex.get("roll")
+            same_roll = (er is None and roll is None) or (
+                er is not None and roll is not None and abs(float(er) - float(roll)) < 0.05
+            )
+            off = ex.get("pre_offset_xy") or [0.0, 0.0]
+            if (
+                same_roll
+                and abs(float(ex.get("gripper", -1.0)) - float(gripper)) < 0.03
+                and abs(float(off[0]) - dx) < 1e-3
+                and abs(float(off[1]) - dy) < 1e-3
+            ):
+                return True
+        return False
+
     for dx, dy, crank, roll, gripper in ordered:
+        if _excluded(roll, gripper, dx, dy):
+            continue
         tried += 1
         restore()
         pre_i = pre_at(dx, dy)
         grasp_i = grasp_at(roll)
         status, cand_lock = _candidate_clear(
-            sim, pre_i, grasp_i, neighbors, gripper, roll, cfg, require_extract=require_extract
+            sim,
+            pre_i,
+            grasp_i,
+            neighbors,
+            gripper,
+            roll,
+            cfg,
+            require_extract=require_extract,
+            target=target,
+            margin=margin,
         )
+        status_count[status] = status_count.get(status, 0) + 1
         if status != "ik":
             reachable += 1
         if status == "extract" and extract_block is None:
@@ -820,6 +1225,20 @@ def plan_approach(
             )
         if status == "collision" and first_block is None:
             first_block = closest_pair(sim, APPROACH_BODIES, neighbors)
+        gap = getattr(sim, "_cand_min_gap", None)
+        if status == "collision" and gap is not None and gap >= _HARD_MARGIN:
+            if near_miss is None or gap > near_miss["min_gap"]:
+                near_miss = {
+                    "roll": roll,
+                    "gripper": gripper,
+                    "lock": cand_lock,
+                    "rank": crank,
+                    "pre": pre_i,
+                    "grasp": grasp_i,
+                    "dxdy": (dx, dy),
+                    "min_gap": gap,
+                    "path_q": getattr(sim, "_cand_path", None),
+                }
         if status == "ok":
             restore()
             # Keep the lock the candidate was verified with. When flex was
@@ -838,9 +1257,36 @@ def plan_approach(
                 "pre": pre_i,
                 "grasp": [float(v) for v in grasp_i],
                 "pre_offset_xy": [float(dx), float(dy)],
+                "statuses": status_count,
+                "near": neighbors,
+                "min_gap_mm": None if gap is None else round(gap * 1000.0, 2),
+                "path_q": getattr(sim, "_cand_path", None),
             }
 
     restore()
+    if near_miss is not None and not lock_roll:
+        # Nothing keeps the preferred margin; take the widest near-miss that
+        # is still physically clear. The descend guard covers the residual.
+        nm = near_miss
+        lock = tuple(nm["lock"]) if nm["lock"] else (("wrist_roll",) if nm["roll"] is not None else ())
+        return {
+            "ok": True,
+            "degraded": True,
+            "roll": None if nm["roll"] is None else float(nm["roll"]),
+            "gripper": float(nm["gripper"]),
+            "lock_joints": lock,
+            "n_wp": 8,
+            "tried": tried,
+            "reachable": reachable,
+            "rank": nm["rank"],
+            "pre": nm["pre"],
+            "grasp": [float(v) for v in nm["grasp"]],
+            "pre_offset_xy": [float(nm["dxdy"][0]), float(nm["dxdy"][1])],
+            "statuses": status_count,
+            "near": neighbors,
+            "min_gap_mm": round(nm["min_gap"] * 1000.0, 2),
+            "path_q": nm["path_q"],
+        }
     return {
         "ok": False,
         "roll": None,
@@ -854,4 +1300,53 @@ def plan_approach(
         "pre": pre_at(0.0, 0.0),
         "pre_offset_xy": [0.0, 0.0],
         "block": extract_block or first_block,
+        "statuses": status_count,
+        "near": neighbors,
     }
+
+
+def verify_approach(
+    sim,
+    pre,
+    grasp,
+    neighbors: list[str],
+    gripper: float,
+    roll: float | None,
+    lock: tuple[str, ...],
+    cfg: dict | None = None,
+    target: str | None = None,
+    margin: float | None = None,
+) -> str:
+    """Re-check one already-chosen approach against a refined grasp point.
+
+    Same test the planner ran, restricted to the lock family it chose, so a
+    close-range perception update that moved the grasp a few mm gets caught
+    before the jaws go down. Returns the candidate status ('ok', ...).
+    """
+    start = sim.qpos()
+    near = near_bodies(sim, list(neighbors), np.asarray(grasp)[:2]) if neighbors else []
+    margin = approach_margin_m(cfg) if margin is None else float(margin)
+    sim._cand_path = None
+    try:
+        lock_flex = "wrist_flex" in tuple(lock)
+        ok, used = _pose_for_candidate(sim, pre, gripper, roll, lock_flex)
+        if not ok:
+            return "ik"
+        pre_a = np.asarray(pre, dtype=float)
+        grasp_a = np.asarray(grasp, dtype=float)
+        path_q = [sim.qpos()]
+        for u in _DESCEND_U:
+            xyz = pre_a + (grasp_a - pre_a) * float(u)
+            if not _solve_path_point(sim, xyz, used, lock_flex):
+                return "ik"
+            path_q.append(sim.qpos())
+            if neighbor_approach_gap(sim, near) < margin:
+                return "collision"
+            if target and _min_gap(sim, JAW_ONLY_BODIES, [target]) < _TARGET_MARGIN:
+                return "target"
+        if _close_sweep_gap(sim, gripper, near, [target] if target else []) < margin:
+            return "collision"
+        sim._cand_path = path_q
+        return "ok"
+    finally:
+        sim.set_qpos(start, hold=True)

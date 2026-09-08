@@ -147,12 +147,16 @@ poses:
     wrist_flex: -0.35
     wrist_roll: 0.0
     gripper: 0.8
-  # Seed from menagerie box-pickup: gripperframe +X already world-down.
+  # Rest / IK seed over d5/e5 with the EE at z=0.11 (jaw tips ~20 mm above a
+  # king). The menagerie box-pickup seed (lift 0, elbow 0.47, flex 1.18) put
+  # the jaw tips 12 mm *into* the board at mid-board, so every return-to-seed
+  # would smash a piece standing on d5/e5. Wrist kept at 1.30 rad: transits
+  # lock the wrist, and a more folded wrist (1.66) loses the h-file reach.
   vertical_seed:
     shoulder_pan: 0.0
-    shoulder_lift: 0.0
-    elbow_flex: 0.47
-    wrist_flex: 1.18
+    shoulder_lift: -0.877
+    elbow_flex: 0.642
+    wrist_flex: 1.30
     wrist_roll: 1.58
     gripper: 0.60
 

@@ -3,14 +3,16 @@
 
   python sim/game.py --gt              # viewer, real-time, ground truth
   mjpython sim/game.py --gt            # macOS
-  python sim/game.py --gt --headless   # no window (2x clock)
+  python sim/game.py --gt --headless   # no window (1x clock; --speed 2 to hurry)
   python sim/game.py --gt --game opera
   python sim/game.py --gt --speed 2    # viewer, sped-up video clock
+  mjpython sim/game.py --gt --keep-going   # do not stop on a scored fail
 
-Default is Morphy's Opera Game. Stops at the first physical failure.
+Default is Morphy's Opera Game. Stops at the first physical failure
+unless `--keep-going`.
 Castling is king then rook. Promotions are not executed.
-The viewer runs in real time so the arm doesn't strobe. Headless keeps
-a 2x clock. `--speed 2` is the old fast viewer; 3x+ drops grasps.
+The viewer runs in real time so the arm doesn't strobe. Headless uses
+the same 1x clock unless `--speed` is set. 3x+ drops grasps.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import argparse
 import io
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -131,9 +134,19 @@ def _under_mjpython() -> bool:
 def _reexec_mjpython() -> None:
     if sys.platform != "darwin" or _under_mjpython():
         return
-    mjpython = Path(sys.executable).resolve().parent / "mjpython"
-    if not mjpython.is_file():
-        raise SystemExit("On macOS the viewer needs mjpython. Run:  mjpython sim/game.py --gt")
+    # Don't .resolve() sys.executable: in a venv it's a symlink into the base
+    # install, which has no mjpython. Look next to the venv's python first.
+    candidates = [
+        Path(sys.prefix) / "bin" / "mjpython",
+        Path(sys.executable).parent / "mjpython",
+        Path(shutil.which("mjpython") or "/nonexistent"),
+    ]
+    mjpython = next((p for p in candidates if p.is_file()), None)
+    if mjpython is None:
+        raise SystemExit(
+            "On macOS the viewer needs mjpython (pip install mujoco provides it). "
+            "Run:  .venv/bin/mjpython sim/game.py --gt"
+        )
     os.execv(str(mjpython), [str(mjpython), *sys.argv])
 
 
@@ -171,6 +184,11 @@ def main() -> int:
     parser.add_argument("--max-ply", type=int, default=80)
     parser.add_argument("--headless", action="store_true", help="no viewer")
     parser.add_argument("--speed", type=float, default=None, help="video clock (2 = 2x dt). viewer default 1; 3+ drops grasps")
+    parser.add_argument(
+        "--keep-going",
+        action="store_true",
+        help="keep playing after a physical fail (collateral, drop, …)",
+    )
     args = parser.parse_args()
     use_vision = bool(args.vision) and not args.gt
     want_view = not args.headless
@@ -181,8 +199,10 @@ def main() -> int:
     elif want_view:
         os.environ.setdefault("ZIMA_SIM_CLOCK", "1")
     else:
-        os.environ.setdefault("ZIMA_SIM_FAST", "1")
-        os.environ.setdefault("ZIMA_SIM_CLOCK", "2")
+        # Match the viewer: 1x clock, full grasp/settle. FAST shortens those
+        # and flakes opening-file collateral (headless e5 / d6). Use --speed
+        # when you want the faster, sloppier clock.
+        os.environ.setdefault("ZIMA_SIM_CLOCK", "1")
     if want_view:
         _reexec_mjpython()
 
@@ -192,6 +212,8 @@ def main() -> int:
     print(replay.variation_san(moves))
     print(f"perception: {'wrist RGB-D' if use_vision else 'ground truth'}")
     print(f"clock: {clock_scale()}x  viewer: {'on' if want_view else 'off'}")
+    if args.keep_going:
+        print("keep-going: on  (scored fails do not stop the game)")
 
     cfg = load_config()
     sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
@@ -262,7 +284,9 @@ def main() -> int:
                         )
                         code = 1
                         rows.append(rec)
-                        break
+                        if not args.keep_going:
+                            break
+                        continue
                 for src, dst in legs:
                     _hook_viewer(sim, viewer)
                     last = play_move(sim, cfg, f"{src} {dst}", use_vision=use_vision)
@@ -296,8 +320,10 @@ def main() -> int:
                         f"{i:02d}  {san}  FAIL  {rec.get('stage') or '?'}  {rec.get('reason') or '?'}",
                         flush=True,
                     )
-                    print(occupancy_text(sim, cfg), flush=True)
                     code = 1
+                    if args.keep_going:
+                        continue
+                    print(occupancy_text(sim, cfg), flush=True)
                     break
             else:
                 print(occupancy_text(sim, cfg))

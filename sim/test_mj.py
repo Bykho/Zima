@@ -193,14 +193,23 @@ def test_unstack_policy():
     ok_front = check("forward blockers are center-rank pawns", set(front) == {"g2", "h2"}, f"front={front}")
     none = forward_blockers("a2", {"a1": "proxy_a1", "b2": "proxy_b2"}, {"pawn"})
     ok_none = check("forward blockers skip same type", none == [], f"front={none}")
-    from pickup import bowl_contains
+    from pickup import bowl_contains, in_trash, in_well
 
     ok_bowl = check(
         "bowl drop is not a chess square",
         bowl_contains([0.35, -0.26, 0.024], [0.35, -0.26, 0.024])
         and not bowl_contains([0.351, 0.006, 0.02], [0.35, -0.26, 0.024]),
     )
-    return ok_pawn and ok_park and ok_skip and ok_lifo and ok_plan and ok_frame and ok_front and ok_none and ok_bowl
+    cfg = load_config()
+    ok_trash = check(
+        "bowl occupants are trash, not board collateral",
+        in_trash([0.35, -0.26, 0.024], cfg) and not in_trash([0.351, 0.006, 0.02], cfg),
+    )
+    ok_well = check(
+        "well occupants are off-board, not board collateral",
+        in_well([0.22, -0.26, 0.024], cfg) and not in_well([0.351, 0.006, 0.02], cfg),
+    )
+    return ok_pawn and ok_park and ok_skip and ok_lifo and ok_plan and ok_frame and ok_front and ok_none and ok_bowl and ok_trash and ok_well
 
 
 def test_home_clears_pieces():
@@ -292,6 +301,77 @@ def test_column_descend_tracks_xy():
     )
 
 
+def test_nest_stands_fallen():
+    """Scoop a fallen man into the cup; same path for every piece."""
+    import numpy as np
+    from pickup import (
+        FULL_BOARD_XML,
+        in_well,
+        queen_tilt_deg,
+        queen_upright,
+        recover_to_nest,
+        seed_vertical,
+    )
+    from squares import nest_xyz
+
+    cfg = load_config()
+    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    seed_vertical(sim, cfg, snap=True)
+    xy = square_to_world("d4", cfg, z=0.028)
+    half = 0.5 * np.pi
+    quat = (float(np.cos(half / 2.0)), 0.0, float(np.sin(half / 2.0)), 0.0)
+    sim.place_object("knight_g8", [xy[0], xy[1], 0.028], quat)
+    sim.target_id = "knight_g8"
+    for _ in range(80):
+        sim.step()
+    rec = recover_to_nest(sim, cfg, "knight_g8")
+    qpos, q = sim.object_pose("knight_g8")
+    nest = nest_xyz(cfg)
+    dist = float(np.hypot(qpos[0] - nest[0], qpos[1] - nest[1]))
+    sim.close()
+    ok = bool(rec.get("ok")) and queen_upright(q, 0.55) and in_well(qpos, cfg) and dist < 0.02
+    return check(
+        "nest cup stands a fallen knight",
+        ok,
+        f"ok={rec.get('ok')} reason={rec.get('reason')} tilt={rec.get('tilt_deg')} "
+        f"xy_mm={dist * 1000:.1f}",
+    )
+
+
+def test_queen_near_base_place():
+    """b3 sits inside the 190 mm workspace hole (Opera Qb3)."""
+    from pickup import FULL_BOARD_XML, execute_move, queen_upright, seed_vertical
+
+    cfg = load_config()
+    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    sim.quiet = True
+    seed_vertical(sim, cfg, snap=True)
+    sim.place_object("queen_d1", square_to_world("f3", cfg, z=0.02))
+    for _ in range(40):
+        sim.step()
+    out = execute_move(
+        sim,
+        cfg,
+        use_vision=False,
+        scenario={
+            "target_id": "queen_d1",
+            "source": "f3",
+            "dest": "b3",
+            "perception": "gt",
+            "quiet": True,
+        },
+    )
+    _, quat = sim.object_pose("queen_d1")
+    err = float(out.get("final_position_error_mm") or 99.0)
+    sim.close()
+    ok = bool(out.get("success")) and queen_upright(quat, 0.5) and err < 18.0
+    return check(
+        "queen f3-b3 near-base place",
+        ok,
+        f"ok={out.get('success')} reason={out.get('failure_reason')} err={err:.1f}mm",
+    )
+
+
 def main():
     quick = "--quick" in sys.argv
     print("Zima MuJoCo tests" + (" (quick)" if quick else "") + "\n")
@@ -308,6 +388,8 @@ def main():
     ]
     if not quick:
         results.append(test_wrist_localize())
+        results.append(test_nest_stands_fallen())
+        results.append(test_queen_near_base_place())
     passed = sum(results)
     total = len(results)
     print(f"\n{passed}/{total} passed")

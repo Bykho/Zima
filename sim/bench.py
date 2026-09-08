@@ -71,8 +71,10 @@ KEEP = (
 def _row(result: dict, board: str) -> dict:
     out = {k: result.get(k) for k in KEEP}
     out["board"] = board
-    out["pickup_success"] = bool(result.get("lift_success"))
+    # A lift that knocked a bystander over is not a pickup anyone can use.
+    out["pickup_success"] = bool(result.get("lift_success")) and not result.get("collateral")
     out["perception_success"] = bool(result.get("perception_success", result.get("queen_detected")))
+    out["collateral"] = result.get("collateral")
     return out
 
 
@@ -570,16 +572,18 @@ def run_starting(cfg: dict, quick: bool = False, pickup_only: bool = False, jobs
 
 def _starting_cases(quick: bool) -> tuple[list[dict], list[dict]]:
     if quick:
-        from scenario import piece_scenario
+        from scenario import piece_scenario, starting_body
 
-        pick_gt = [
-            piece_scenario("queen", "d1", "d4", "gt", hide_proxy="d1", stop_after="lift", quiet=True),
-            piece_scenario("pawn", "a2", "d4", "gt", hide_proxy="a2", stop_after="lift", quiet=True),
-            piece_scenario("king", "e1", "d4", "gt", hide_proxy="e1", stop_after="lift", quiet=True),
-        ]
-        pick_vis = [
-            piece_scenario("queen", "d1", "d4", "vision", hide_proxy="d1", stop_after="lift", quiet=True),
-        ]
+        def _q(kind, src, perc):
+            # Full-board bodies are named {kind}_{square}; the bare kind is a
+            # stowed free body, so without target_id every quick case missed.
+            return piece_scenario(
+                kind, src, "d4", perc, hide_proxy=src, stop_after="lift", quiet=True,
+                target_id=starting_body(kind, src), name=f"start_pick_{kind}_{src}_d4_{perc}",
+            )
+
+        pick_gt = [_q("queen", "d1", "gt"), _q("pawn", "a2", "gt"), _q("king", "e1", "gt")]
+        pick_vis = [_q("queen", "d1", "vision")]
         return pick_gt, pick_vis
     return starting_pickup_scenarios("gt"), starting_pickup_scenarios("vision")
 

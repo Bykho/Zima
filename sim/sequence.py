@@ -319,6 +319,7 @@ def probe_approach(
     plan = plan_approach(
         sim, pre, grasp, open_g, clutter, source=source, cfg=cfg, scenario=scenario,
         require_extract=require_extract, force_roll=force_roll, lock_roll=lock_roll,
+        target=tid,
     )
     sim.set_qpos(q0, hold=True)
     return plan

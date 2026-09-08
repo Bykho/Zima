@@ -209,8 +209,13 @@ def solve_ik_down(
     damping: float = 1e-3,
     step: float = 0.6,
     ori_weight: float = 0.05,
+    x_axis=None,
 ) -> bool:
     """Reach target_pos with gripper +X pointing world-down (a vertical pinch).
+
+    x_axis: optional world direction for gripper +X instead of straight down.
+    Used to lift with the *current* orientation frozen when a vertical pinch
+    was not reachable, so the jaws translate instead of swinging.
 
     Joint 5-row task: position (3) + the x/y world components of gripper +X
     (2), which are zero when the approach axis is vertical. With pan, lift,
@@ -234,6 +239,10 @@ def solve_ik_down(
     jacr = np.zeros((3, model.nv))
     w = float(ori_weight)
     tilt_tol = np.sin(np.radians(tilt_tol_deg))
+    axis = None
+    if x_axis is not None:
+        axis = np.asarray(x_axis, dtype=np.float64)
+        axis = axis / (np.linalg.norm(axis) + 1e-12)
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
     best = float("inf")
@@ -242,9 +251,13 @@ def solve_ik_down(
         R = data.site_xmat[sid].reshape(3, 3)
         x = R[:, 0]
         e_pos = target - data.site_xpos[sid]
-        e_ori = -x[:2]  # want x_world = (0, 0, -1)
+        if axis is None:
+            e_ori = -x[:2]  # want x_world = (0, 0, -1)
+        else:
+            # residual c = x × a (zero when aligned); error = 0 - c
+            e_ori = -np.cross(x, axis)
         pos_err = float(np.linalg.norm(e_pos))
-        tilt = float(np.linalg.norm(x[:2]))
+        tilt = float(np.linalg.norm(e_ori))
         if pos_err < pos_tol and tilt < tilt_tol:
             break
         score = pos_err + w * tilt
@@ -259,7 +272,12 @@ def solve_ik_down(
         Jp = jacp[:, dof_ids]
         # d(x_axis)/dq = omega x x_axis = -[x]_x omega
         Jx = -np.cross(np.broadcast_to(x, (len(dof_ids), 3)), jacr[:, dof_ids].T).T
-        J = np.vstack([Jp, w * Jx[:2]])
+        if axis is None:
+            Jo = Jx[:2]
+        else:
+            # d(x × a)/dq = -[a]_× dx
+            Jo = -np.cross(np.broadcast_to(axis, (len(dof_ids), 3)), Jx.T).T
+        J = np.vstack([Jp, w * Jo])
         e = np.concatenate([e_pos, w * e_ori])
         dq = J.T @ np.linalg.solve(J @ J.T + damping * np.eye(J.shape[0]), e)
         data.qpos[qadr] = np.clip(data.qpos[qadr] + step * dq, lo, hi)
@@ -501,9 +519,14 @@ def move_ik(
     """
     start = sim.qpos()
     down = bool(ik_kwargs.pop("down", False))
+    # guard: callable checked after every physics step; returning truthy
+    # aborts the motion in place (the arm holds where it is) and move_ik
+    # returns False with sim._last_abort set to the returned value.
+    guard = ik_kwargs.pop("guard", None)
+    x_axis = ik_kwargs.pop("x_axis", None)
     if down:
         lock = tuple(ik_kwargs.get("lock_joints", ()))
-        solved = solve_ik_down(sim, target_pos, lock_joints=lock)
+        solved = solve_ik_down(sim, target_pos, lock_joints=lock, x_axis=x_axis)
     else:
         solved = solve_ik(sim, target_pos, **ik_kwargs)
     if not solved:
@@ -524,6 +547,13 @@ def move_ik(
         sim.step()
         if not physics:
             sim.set_qpos(cmd, hold=True)
+        if guard is not None:
+            hit = guard()
+            if hit:
+                sim._last_abort = hit
+                if physics:
+                    sim.hold(sim.qpos())
+                return False
     if physics:
         sim.hold(goal)
         extra = (4 if fast_enabled() else 20) if settle is None else max(0, int(settle))

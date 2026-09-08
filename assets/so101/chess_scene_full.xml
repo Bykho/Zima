@@ -47,26 +47,28 @@
         rgba="0.36 0.22 0.13 1"/>
     </body>
 
-    <!-- Off-board well: insert a fallen piece while holding; walls stand it up. -->
+    <!-- Off-board cup: 28 mm inner, inner lip ~34 mm. Seat a held fallen
+         man on the lip and let go; gravity stands it. Pinch the stem that
+         sticks out — same motion on the real arm. -->
     <body name="reorient_nest" pos="0.22 -0.26 0.01">
-      <geom name="nest_floor" type="box" size="0.020 0.020 0.004" pos="0 0 0.004"
+      <geom name="nest_floor" type="box" size="0.014 0.014 0.004" pos="0 0 0.004"
         rgba="0.28 0.16 0.10 1" friction="1.4 0.01 0.001" condim="3"/>
-      <geom name="nest_n" type="box" size="0.022 0.005 0.008" pos="0 0.019 0.016"
+      <geom name="nest_n" type="box" size="0.020 0.006 0.011" pos="0 0.020 0.015"
         rgba="0.42 0.26 0.14 1" friction="0.55 0.005 0.0005"/>
-      <geom name="nest_s" type="box" size="0.022 0.005 0.008" pos="0 -0.019 0.016"
+      <geom name="nest_s" type="box" size="0.020 0.006 0.011" pos="0 -0.020 0.015"
         rgba="0.42 0.26 0.14 1" friction="0.55 0.005 0.0005"/>
-      <geom name="nest_e" type="box" size="0.005 0.014 0.008" pos="0.019 0 0.016"
+      <geom name="nest_e" type="box" size="0.006 0.014 0.011" pos="0.020 0 0.015"
         rgba="0.42 0.26 0.14 1" friction="0.55 0.005 0.0005"/>
-      <geom name="nest_w" type="box" size="0.005 0.014 0.008" pos="-0.019 0 0.016"
+      <geom name="nest_w" type="box" size="0.006 0.014 0.011" pos="-0.020 0 0.015"
         rgba="0.42 0.26 0.14 1" friction="0.55 0.005 0.0005"/>
-      <geom name="nest_flare_n" type="box" size="0.036 0.006 0.007" pos="0 0.034 0.031"
-        rgba="0.38 0.24 0.13 1" friction="0.45 0.005 0.0005"/>
-      <geom name="nest_flare_s" type="box" size="0.036 0.006 0.007" pos="0 -0.034 0.031"
-        rgba="0.38 0.24 0.13 1" friction="0.45 0.005 0.0005"/>
-      <geom name="nest_flare_e" type="box" size="0.006 0.028 0.007" pos="0.034 0 0.031"
-        rgba="0.38 0.24 0.13 1" friction="0.45 0.005 0.0005"/>
-      <geom name="nest_flare_w" type="box" size="0.006 0.028 0.007" pos="-0.034 0 0.031"
-        rgba="0.38 0.24 0.13 1" friction="0.45 0.005 0.0005"/>
+      <geom name="nest_lip_n" type="box" size="0.021 0.004 0.004" pos="0 0.021 0.028"
+        rgba="0.38 0.24 0.13 1" friction="0.40 0.005 0.0005"/>
+      <geom name="nest_lip_s" type="box" size="0.021 0.004 0.004" pos="0 -0.021 0.028"
+        rgba="0.38 0.24 0.13 1" friction="0.40 0.005 0.0005"/>
+      <geom name="nest_lip_e" type="box" size="0.004 0.017 0.004" pos="0.021 0 0.028"
+        rgba="0.38 0.24 0.13 1" friction="0.40 0.005 0.0005"/>
+      <geom name="nest_lip_w" type="box" size="0.004 0.017 0.004" pos="-0.021 0 0.028"
+        rgba="0.38 0.24 0.13 1" friction="0.40 0.005 0.0005"/>
     </body>
 
     <!-- Developer cameras — not used by the robot. -->

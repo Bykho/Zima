@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -129,9 +130,19 @@ def _reexec_mjpython() -> None:
     """macOS MuJoCo viewer only works under mjpython."""
     if sys.platform != "darwin" or _under_mjpython():
         return
-    mjpython = Path(sys.executable).resolve().parent / "mjpython"
-    if not mjpython.is_file():
-        raise SystemExit("On macOS the viewer needs mjpython. Run:  mjpython sim/play.py")
+    # Don't .resolve() sys.executable: in a venv it's a symlink into the base
+    # install, which has no mjpython. Look next to the venv's python first.
+    candidates = [
+        Path(sys.prefix) / "bin" / "mjpython",
+        Path(sys.executable).parent / "mjpython",
+        Path(shutil.which("mjpython") or "/nonexistent"),
+    ]
+    mjpython = next((p for p in candidates if p.is_file()), None)
+    if mjpython is None:
+        raise SystemExit(
+            "On macOS the viewer needs mjpython (pip install mujoco provides it). "
+            "Run:  .venv/bin/mjpython sim/play.py"
+        )
     os.execv(str(mjpython), [str(mjpython), *sys.argv])
 
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from metrics import annotate_episode
 from pickup import (
+    _js_raise_ee,
     execute_move,
+    in_trash,
     open_gripper,
     pickup_cfg,
     seed_vertical,
@@ -217,7 +219,9 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
         finally:
             in_progress.discard(square)
 
-    if populated:
+    # Bowl dumps must not park neighbors (Opera dxe5 was unstacking e4/Nf3
+    # to "clear" e5, then knocking them). Live play still unstacks.
+    if populated and not sc.get("place_xyz") and sc.get("unstack", True):
         failed_homes: set[str] = set()
         in_progress: set[str] = set()
         _unstack(source, kind)
@@ -339,19 +343,20 @@ def _restore_capture(sim, cfg: dict, dst: str, snap: dict) -> None:
     _ = (sim, cfg, dst, snap)
 
 
-def _freeze_loot(sim, kind: str) -> dict | None:
+def _freeze_loot(sim, body: str) -> dict | None:
     """Leave a static token in the bowl and free the reusable body."""
-    xyz, quat = sim.object_pose(kind)
+    xyz, quat = sim.object_pose(body)
     n = int(getattr(sim, "_loot_n", 0))
     name = f"loot_{n}"
+    kind = body_kind(body) or body
     if sim.body_model_pos(name) is None:
-        sim.place_object(kind, HIDE_XYZ)
+        sim.place_object(body, HIDE_XYZ)
         return None
     sim.set_body_pos(name, [float(xyz[0]), float(xyz[1]), max(float(xyz[2]), 0.02)])
-    color = sim.body_rgba(kind)
+    color = sim.body_rgba(body)
     if color is not None:
         sim.tint_body(name, color)
-    sim.place_object(kind, HIDE_XYZ)
+    sim.place_object(body, HIDE_XYZ)
     homes = getattr(sim, "_kind_proxy_home", {})
     homes.pop(kind, None)
     sim._kind_proxy_home = homes
@@ -426,6 +431,15 @@ def discard_square(
         defer_restack=defer_restack,
     )
     result = run_episode(sim, cfg, use_vision=use_vision, scenario=sc)
+    tid = kind if str(body).startswith("proxy_") else body
+    if result.get("success"):
+        try:
+            dumped_xyz, _ = sim.object_pose(tid)
+        except Exception:
+            dumped_xyz = None
+        if dumped_xyz is None or not in_trash(dumped_xyz, cfg):
+            result["success"] = False
+            result["failure_reason"] = result.get("failure_reason") or "PLACEMENT_POSITION_ERROR"
     if not result.get("success"):
         if promoted and proxy_xyz is not None and snap and snap.get("home"):
             restore_proxy(sim, kind, snap.get("xyz") or proxy_xyz, snap["home"])
@@ -435,7 +449,7 @@ def discard_square(
         result["failure_stage"] = result.get("failure_stage") or "capture"
         return result
     if str(body).startswith("proxy_") or body in PIECE_BODIES:
-        loot = _freeze_loot(sim, kind)
+        loot = _freeze_loot(sim, tid)
         if loot is not None:
             loot["home"] = (snap or {}).get("home")
             snap = loot
@@ -537,6 +551,10 @@ def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
             return dumped
         capture_snap = dumped.get("capture_snap")
         parked = dumped.get("parked") or []
+        # Bowl dump leaves the arm over the tray. Raise there — folding to
+        # the seed from the last square swept through Nf3 (Opera dxe5).
+        _js_raise_ee(sim, z_min=0.12)
+        settle_queen(sim, steps=24)
         occ = occupied_squares(sim, cfg)
         body = occ.get(src, body)
         kind = piece_kind(src, body) if src in occ else kind
