@@ -82,3 +82,33 @@ def estimate_target_pose(obs: RgbdObservation, cfg: dict, square: str) -> np.nda
 def estimate_queen_pose(obs: RgbdObservation, cfg: dict, square: str = "d1") -> np.ndarray | None:
     """Alias used by existing tests; same estimator."""
     return estimate_target_pose(obs, cfg, square)
+
+
+_TOP_CEIL = 0.075
+_TOP_PCT = 95.0
+
+
+def observe_piece(obs: RgbdObservation, cfg: dict, square: str, grow: float = 1.25) -> dict | None:
+    """Largest blob on/near `square`: base XY on the board plane and top height above it.
+
+    `grow` widens the square crop so a piece that slid off-center is still seen.
+    """
+    pts = unproject(obs)
+    if len(pts) == 0:
+        return None
+    board = cfg.get("sim", {}).get("board", {})
+    surface = float(board.get("surface_z", 0.02))
+    half = 0.5 * float(board.get("square_size", 0.0375)) * float(grow)
+    cx, cy, _ = square_to_world(square, cfg)
+    keep = (
+        (np.abs(pts[:, 0] - cx) <= half)
+        & (np.abs(pts[:, 1] - cy) <= half)
+        & (pts[:, 2] > surface + _BOARD_LIFT)
+        & (pts[:, 2] < surface + _TOP_CEIL)
+    )
+    pts = _largest_cluster(pts[keep])
+    if len(pts) < _MIN_POINTS:
+        return None
+    xy = pts.mean(axis=0)[:2]
+    top = float(np.percentile(pts[:, 2], _TOP_PCT)) - surface
+    return {"xy": [float(xy[0]), float(xy[1])], "top_h": top, "n": int(len(pts))}

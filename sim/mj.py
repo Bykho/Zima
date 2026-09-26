@@ -121,6 +121,10 @@ class Sim:
     def qpos(self) -> dict[str, float]:
         return {n: float(self.data.qpos[self.model.jnt_qposadr[j]]) for n, j in self._joint.items()}
 
+    def qvel(self) -> dict[str, float]:
+        """Joint speeds (servo Present_Speed on the real arm)."""
+        return {n: float(self.data.qvel[self.model.jnt_dofadr[j]]) for n, j in self._joint.items()}
+
     def set_qpos(self, positions: dict[str, float], hold: bool = True):
         for name, value in positions.items():
             jid = self._joint[name]

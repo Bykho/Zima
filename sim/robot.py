@@ -20,6 +20,13 @@ import numpy as np
 from mj import JOINT_NAMES, Sim
 
 HIDE_Z = -1.0
+EE_SITE = "gripperframe"
+GRIP_LOAD_HELD = 0.08  # |gripper effort| while squeezing (relaxed pawn carry ~0.2); empty close reads ~0.003
+GRIP_STILL_RADS = 0.03  # jaw speed below this with closing load = stalled on a piece
+GRIP_ATTACH_XY_M = 0.025
+PAD_GEOMS = ("fixed_jaw_box4", "moving_jaw_box2")  # opposing contact plates at pinch height
+GRIP_LOAD_RELEASED = 0.04  # below this effort the jaws are no longer holding anything
+GRIP_RELEASE_READS = 5
 
 
 class GroundTruthAccess(RuntimeError):
@@ -63,6 +70,12 @@ def open_robot(world: Sim, wall: str = "cheat"):
     raise ValueError(f"wall must be one of {WALLS}")
 
 
+def jaw_squeezing(sim) -> bool:
+    """Gripper stalled on something: closing effort with the jaw at rest (servo load + speed)."""
+    load = float(sim.actuator_forces()[sim._act["gripper"]])
+    return load < -GRIP_LOAD_HELD and abs(sim.qvel()["gripper"]) < GRIP_STILL_RADS
+
+
 def piece_free_joints(model) -> list[int]:
     """Free joints of movable scene bodies (the pieces)."""
     return [j for j in range(model.njnt) if int(model.jnt_type[j]) == int(mujoco.mjtJoint.mjJNT_FREE)]
@@ -81,6 +94,9 @@ class Robot(Sim):
         self._free = piece_free_joints(self.model)
         self._piece_names = {mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, int(self.model.jnt_bodyid[j])) for j in self._free}
         self.known: set[str] = set(self._piece_names) if self.cheat_state else set()
+        self.held: str | None = None
+        self._held_off = None
+        self._slack = 0
         if not self.cheat_state:
             for j in self._free:
                 adr = int(self.model.jnt_qposadr[j])
@@ -98,6 +114,8 @@ class Robot(Sim):
             self.data.qpos[:] = w.data.qpos
         else:
             self.data.qpos[self._arm_adr] = w.data.qpos[self._arm_adr]
+            mujoco.mj_kinematics(self.model, self.data)
+            self._track_held()
         self.data.qvel[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
@@ -120,6 +138,9 @@ class Robot(Sim):
 
     def actuator_forces(self) -> np.ndarray:
         return self._world.actuator_forces()
+
+    def qvel(self) -> dict[str, float]:
+        return self._world.qvel()
 
     def render(self, camera: str, width: int = 640, height: int = 480) -> np.ndarray:
         return self._world.render(camera, width, height)
@@ -148,13 +169,83 @@ class Robot(Sim):
             raise GroundTruthAccess(f"{body} has not been perceived")
         return super().object_pose(body)
 
-    # -- truth the real arm does not have ---------------------------------
+    # -- contacts: measured in the world when cheating, else predicted by belief
 
     def contact_bodies(self):
-        return gt(self).contact_bodies()
+        if self.cheat_state:
+            return self._world.contact_bodies()
+        return super().contact_bodies()
 
     def contacts_with(self, body: str) -> list[dict]:
-        return gt(self).contacts_with(body)
+        if self.cheat_state:
+            return self._world.contacts_with(body)
+        return super().contacts_with(body)
+
+    # -- held piece: belief rides on the gripper while the jaws squeeze -----
+
+    def gripper_load(self) -> float:
+        return float(self.actuator_forces()[self._act["gripper"]])
+
+    def squeezing(self) -> bool:
+        return jaw_squeezing(self)
+
+    def _jaw_center(self) -> np.ndarray:
+        return 0.5 * (self.geom_xpos("fixed_jaw_sph_tip1") + self.geom_xpos("moving_jaw_sph_tip1"))
+
+    def _between_jaws(self) -> str | None:
+        c = self._jaw_center()
+        best, best_d = None, GRIP_ATTACH_XY_M
+        for name in self.known:
+            p = self.body_pose(name)[0]
+            d = float(np.hypot(p[0] - c[0], p[1] - c[1]))
+            if d < best_d and p[2] < c[2] + 0.01:
+                best, best_d = name, d
+        return best
+
+    def attach(self, body: str) -> None:
+        """Both pads touch the piece: along the pinch axis it sits midway between them."""
+        a = self.geom_xpos(PAD_GEOMS[0])
+        b = self.geom_xpos(PAD_GEOMS[1])
+        axis = (b - a) / max(float(np.linalg.norm(b - a)), 1e-9)
+        pb, qb = self.body_pose(body)
+        pb = pb + float(np.dot(0.5 * (a + b) - pb, axis)) * axis
+        super().place_object(body, pb, qb)
+        pe, Re = self.site_pose(EE_SITE)
+        pb, qb = self.body_pose(body)
+        Rb = np.zeros(9)
+        mujoco.mju_quat2Mat(Rb, qb)
+        Rb = Rb.reshape(3, 3)
+        self.held = body
+        self._slack = 0
+        self._held_off = (Re.T @ (pb - pe), Re.T @ Rb)
+
+    def detach(self) -> None:
+        self._slack = 0
+        self.held = None
+        self._held_off = None
+
+    def _track_held(self) -> None:
+        if self.held is None:
+            if self.squeezing():
+                body = self._between_jaws()
+                if body is not None:
+                    self.attach(body)
+            return
+        if self.gripper_load() > -GRIP_LOAD_RELEASED:
+            self._slack += 1
+            if self._slack >= GRIP_RELEASE_READS:
+                self.detach()
+                return
+        else:
+            self._slack = 0
+        pe, Re = self.site_pose(EE_SITE)
+        p_off, R_off = self._held_off
+        q = np.zeros(4)
+        mujoco.mju_mat2Quat(q, (Re @ R_off).reshape(-1))
+        jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{self.held}_free")
+        adr = int(self.model.jnt_qposadr[jid])
+        self.data.qpos[adr : adr + 3] = pe + Re @ p_off
+        self.data.qpos[adr + 3 : adr + 7] = q
 
     # -- scene edits act on the world; belief learns them only by cheating -
 

@@ -53,13 +53,13 @@ from clearance import (
     transit_nontarget_hit,
     verify_approach,
 )
-from perception import estimate_target_pose
+from perception import estimate_target_pose, observe_piece
 from sensor import capture as capture_wrist, wrist_sees_point
 from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
 from sequence import square_of_body
-from robot import WALLS, gt, open_robot, world_of
+from robot import WALLS, gt, jaw_squeezing, open_robot, world_of
 
 JAW_BODIES = ("gripper", "moving_jaw_so101_v1")
 CAMERA_BODIES = ("camera_mount",)
@@ -971,7 +971,7 @@ def bystander_contact(sim: Sim, bodies: list[str]) -> dict | None:
     Vectorized over the contact array so it is cheap enough to run every
     physics step as a motion guard.
     """
-    w = gt(sim)
+    w = world_of(sim) if getattr(sim, "cheat_state", True) else sim
     b1, b2 = w.contact_bodies()
     if b1.size == 0:
         return None
@@ -2409,11 +2409,13 @@ def _after_place_fail(
     )
 
 
+def gripper_load(sim: Sim) -> float:
+    return float(sim.actuator_forces()[sim._act["gripper"]])
+
+
 def grasp_acquired(sim: Sim, object_id: str | None = None) -> bool:
-    tid = object_id or _tid(sim)
-    hits = sim.contacts_with(tid)
-    jaws = {h["other"] for h in hits if h["force"] > 0.02}
-    return "gripper" in jaws or "moving_jaw_so101_v1" in jaws
+    """Jaws are squeezing something: gripper servo load and speed, the only grasp sensors on the arm."""
+    return jaw_squeezing(sim)
 
 
 def _jaws_on_piece(sim: Sim) -> bool:
@@ -2421,11 +2423,9 @@ def _jaws_on_piece(sim: Sim) -> bool:
 
 
 def _piece_in_jaws(sim: Sim) -> str | None:
-    for i in range(sim.model.nbody):
-        name = sim.body_name(i)
-        if name and body_kind(name) and grasp_acquired(sim, name):
-            return name
-    return None
+    if not grasp_acquired(sim):
+        return None
+    return getattr(sim, "held", None) or _tid(sim)
 
 
 def object_on_board(sim: Sim, surface: float, z_tol: float = 0.012, object_id: str | None = None) -> bool:
@@ -2433,6 +2433,8 @@ def object_on_board(sim: Sim, surface: float, z_tol: float = 0.012, object_id: s
     qpos, _ = sim.object_pose(tid)
     if abs(float(qpos[2]) - surface) > z_tol:
         return False
+    if _perceiving(sim):
+        return True
     return any(h["other"] == "board" for h in sim.contacts_with(tid))
 
 
@@ -2690,10 +2692,18 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
     tid = _tid(sim)
     obs = capture_wrist(sim)
     est = estimate_target_pose(obs, cfg, square)
-    gt, _ = sim.object_pose(tid)
+    gt, _ = world_of(sim).object_pose(tid)
     if est is None:
         result["estimated_position_error_mm"] = None
         return None
+    if hasattr(sim, "believe"):
+        surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+        seen = observe_piece(obs, cfg, square, grow=1.0)
+        height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
+        upright = seen is None or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+        quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
+        result["observed_top_h_mm"] = None if seen is None else round(seen["top_h"] * 1000, 1)
+        sim.believe(tid, [float(est[0]), float(est[1]), surface], quat)
     err = float(np.linalg.norm(est[:2] - gt[:2]))
     result["estimated_position_error_mm"] = err * 1000.0
     result["queen_estimated_xyz"] = est[:3].tolist()
@@ -2702,6 +2712,43 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         print(f"  gt_xyz:        {np.round(gt, 4).tolist()}")
         print(f"  position_error_mm: {err * 1000:.1f}")
     return est[:3]
+
+
+def _perceiving(sim) -> bool:
+    """Controller state comes from perception (Robot wall without cheat_state)."""
+    return hasattr(sim, "believe") and not sim.cheat_state
+
+
+def _belief_set_down(sim, tid: str, surface: float) -> None:
+    """Released piece: belief stands it on its base under the jaws (a placed man settles upright)."""
+    if not _perceiving(sim) or tid not in sim.known:
+        return
+    p, q = sim.object_pose(tid)
+    R = np.zeros(9)
+    mujoco.mju_quat2Mat(R, q)
+    x = R.reshape(3, 3)[:, 0]
+    yaw = float(np.arctan2(x[1], x[0]))
+    sim.believe(tid, [float(p[0]), float(p[1]), surface], (np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)))
+
+
+def verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
+    """Wrist look at `square`; belief takes the observed XY and upright/lying."""
+    surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+    target = square_to_world(square, cfg, z=surface)
+    if _reach_observe(sim, cfg, target, tid) is None:
+        return {"looked": False}
+    seen = observe_piece(capture_wrist(sim), cfg, square)
+    if seen is None:
+        sim.forget(tid)
+        return {"looked": True, "seen": False}
+    height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
+    upright = seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+    quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
+    sim.believe(tid, [seen["xy"][0], seen["xy"][1], surface], quat)
+    return {"looked": True, "seen": True, "upright": upright, "top_h_mm": round(seen["top_h"] * 1000, 1), "xy": seen["xy"]}
+
+
+VERIFY_UPRIGHT_FRAC = 0.7
 
 
 def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:
@@ -3089,6 +3136,17 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         if result.get("failure_reason") in ("IK_FAILURE", "IK_NO_SOLUTION") and not result.get("ik_fail_phase"):
             result["ik_fail_phase"] = getattr(sim, "_pickup_phase", None)
         _fill_fail_diag()
+        if W is not sim:
+            wp, wq = W.object_pose(tid)
+            if off_board:
+                world_ok = bowl_contains(wp, dest_xy)
+            else:
+                world_ok = square_of_body(W, cfg, tid) == dest and queen_upright(wq, tilt_max=0.5)
+            result["belief_success"] = bool(result.get("success"))
+            result["world_success"] = bool(world_ok)
+            result["success"] = bool(result.get("success") and world_ok)
+            if result["belief_success"] and not world_ok:
+                result["failure_reason"] = "BELIEF_WRONG"
         annotate_episode(result)
         return result
 
@@ -3145,7 +3203,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     settle_queen(sim, steps=48)
     _collateral_snapshot()
 
-    actual, _ = sim.object_pose(tid)
+    actual, _ = W.object_pose(tid)
     result["actual_start_pose"] = actual.tolist()
     result["queen_start_xyz"] = actual.tolist()
     log_state(sim, "001_initial", extra={"spawn": _xyz(spawn)})
@@ -3924,6 +3982,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     release_g = min(float(g_hi), float(release_open))
     open_gripper(sim, release_g, steps=100)
     settle_queen(sim, steps=16)
+    _belief_set_down(sim, tid, surface)
     result["release_after_open"] = release_snapshot(sim, tid)
     q_open, _ = sim.object_pose(tid)
     result["place_diag"]["piece_xy_after_open_mm"] = [
@@ -4060,9 +4119,15 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         )
         return again if again is not None else _done()
     settle_queen(sim, steps=48)
+    if _perceiving(sim) and not off_board:
+        look = verify_piece(sim, cfg, tid, dest)
+        result["place_diag"]["verify_look"] = look
+        result["placement_success"] = bool(
+            look.get("seen") and look.get("upright") and square_of_body(sim, cfg, tid) == dest
+        )
     # L-shaped men wobble after release then stand. Scooping a piece that
     # is already on dest just to cup it (Nf6) is worse than waiting.
-    if not off_board and not result.get("placement_success"):
+    if not off_board and not result.get("placement_success") and not _perceiving(sim):
         q_w, q_wq = sim.object_pose(tid)
         if square_of_body(sim, cfg, tid) == dest and not queen_upright(q_wq, tilt_max=0.5):
             settle_queen(sim, steps=120)
@@ -4077,7 +4142,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                 result["place_diag"]["wobble_settled"] = True
     log_state(sim, "010_final")
 
-    qpos, qquat = sim.object_pose(tid)
+    qpos, qquat = W.object_pose(tid)
     result["final_position_error_mm"] = float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) * 1000
     result["final_queen_xyz"] = qpos.tolist()
     result["place_diag"]["final_xy_mm"] = [
@@ -4092,6 +4157,11 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     result["place_diag"]["jaw_contact_after_retreat"] = bool(grasp_acquired(sim, tid))
     result["place_diag"]["final_z_mm"] = round(float(qpos[2]) * 1000, 1)
     result["place_diag"]["final_upright"] = bool(queen_upright(qquat, tilt_max=0.5))
+    if _perceiving(sim):
+        if tid in sim.known:
+            qpos, qquat = sim.object_pose(tid)
+        else:
+            qpos, qquat = np.array([0.0, 0.0, -1.0]), np.array([1.0, 0.0, 0.0, 0.0])
     on_dest = square_of_body(sim, cfg, tid) == dest
     if off_board:
         result["retreat_success"] = bool(
