@@ -31,6 +31,8 @@ from ik import (
     move_ik,
     move_lin,
     move_qpos,
+    pose_reaches,
+    reachable_approaches,
     solve_ik,
     solve_ik_down,
     solve_ik_upright,
@@ -42,6 +44,7 @@ from clearance import (
     approach_margin_m,
     board_top_z,
     closest_pair,
+    near_bodies,
     neighbor_approach_gap,
     obstacle_bodies,
     plan_approach,
@@ -56,6 +59,7 @@ from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
 from sequence import square_of_body
+from robot import WALLS, gt, open_robot, world_of
 
 JAW_BODIES = ("gripper", "moving_jaw_so101_v1")
 CAMERA_BODIES = ("camera_mount",)
@@ -212,10 +216,11 @@ def log_state(sim: Sim, name: str, extra: dict | None = None):
     if getattr(sim, "quiet", False):
         return
     tid = _tid(sim)
-    qpos, qquat = sim.object_pose(tid)
+    W = world_of(sim)
+    qpos, qquat = W.object_pose(tid)
     gpos, grot = sim.site_pose(EE_SITE)
     gap = sim.jaw_gap()
-    contacts = sim.contacts_with(tid)
+    contacts = W.contacts_with(tid)
     print(f"\nSTATE: {name}")
     print(f"  {tid}_ground_truth_xyz: {np.round(qpos, 4).tolist()}")
     print(f"  {tid}_quat:             {np.round(qquat, 4).tolist()}")
@@ -377,7 +382,12 @@ def _safe_lin(
         n_wp = max(6, int(np.ceil(max(dist, 0.03) / 0.03)))
         for extra_z in (0.0, 0.03, 0.06):
             g = [dest[0], dest[1], dest[2] + extra_z]
-            wps = [_floor_wp(wp, cfg) for wp in _line_wps(cur, g, n_wp)]
+            # Floor long XY cruises so they do not ask for a dead hover.
+            # A +Z rise over a just-placed man must stay on that XY — flooring
+            # it walks out to the 190 mm ring and combs the piece (b3).
+            xy = float(np.hypot(g[0] - cur[0], g[1] - cur[1]))
+            raw = _line_wps(cur, g, n_wp)
+            wps = [_floor_wp(wp, cfg) for wp in raw] if xy > 0.02 else raw
             if not _chain_ik_ok(sim, wps, use_lock, obstacles=obstacles, skip=sk):
                 continue
             if _follow_wps(sim, wps, dur, use_lock):
@@ -422,8 +432,10 @@ def _clear_to_seed(sim: Sim, cfg: dict, seed: dict):
     sim.hold(seed)
 
 
-def _reset_ik_seed(sim: Sim, cfg: dict):
-    seed = _vertical_seed(cfg)
+def _reset_ik_seed(sim: Sim, cfg: dict, keep: dict | None = None):
+    seed = dict(_vertical_seed(cfg))
+    if keep:
+        seed.update(keep)
     sim.set_qpos(seed, hold=True)
 
 
@@ -770,6 +782,15 @@ def _place_ee_target(
         sim.set_qpos(snap, hold=True)
 
 
+def _place_lower_guard(sim: Sim, tid: str, bystanders: list[str]):
+    """Stop a place-lower before jaws shove a neighbor (Rxd7 / Qd8)."""
+    if _touching_board(sim, tid):
+        return "board"
+    if bystanders:
+        return bystander_contact(sim, bystanders)
+    return None
+
+
 def _lower_vertical(
     sim: Sim, tid: str, dest_xy, place_z: float, hold: tuple[str, ...], result: dict, x_axis=None
 ) -> list[float] | None:
@@ -779,6 +800,13 @@ def _lower_vertical(
     the bishop (f1c4). Lock flex+roll and translate.
     """
     lock = tuple(dict.fromkeys((*hold, "wrist_flex", "wrist_roll")))
+    bystanders = near_bodies(
+        sim,
+        [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"],
+        dest_xy,
+        radius=0.055,
+    )
+    guard = lambda: _place_lower_guard(sim, tid, bystanders)
     gpos, _ = sim.site_pose(EE_SITE)
     q, _ = sim.object_pose(tid)
     align = [
@@ -787,8 +815,25 @@ def _lower_vertical(
         float(gpos[2]),
     ]
     if float(np.hypot(align[0] - gpos[0], align[1] - gpos[1])) > 0.001:
-        if not move_lin(sim, align, duration=0.8, physics=True, n_wp=8, lock_joints=lock):
-            return None
+        if not move_lin(sim, align, duration=0.8, physics=True, n_wp=8, lock_joints=lock, guard=guard):
+            if getattr(sim, "_last_abort", None) not in (None, "board"):
+                result["place_diag"]["lower_bystander"] = getattr(sim, "_last_abort", None)
+            # High hover over a near-base dest is often dead. Drop, then slide.
+            for z in (0.07, 0.055, 0.045):
+                drop = [float(gpos[0]), float(gpos[1]), float(z)]
+                if not move_lin(sim, drop, duration=0.6, physics=True, n_wp=6, lock_joints=lock, guard=guard):
+                    continue
+                gpos, _ = sim.site_pose(EE_SITE)
+                q, _ = sim.object_pose(tid)
+                slide = [
+                    float(gpos[0] + dest_xy[0] - q[0]),
+                    float(gpos[1] + dest_xy[1] - q[1]),
+                    float(z),
+                ]
+                if move_lin(sim, slide, duration=0.8, physics=True, n_wp=8, lock_joints=lock, guard=guard):
+                    break
+            else:
+                return None
     gpos, _ = sim.site_pose(EE_SITE)
     q, _ = sim.object_pose(tid)
     place = [
@@ -800,12 +845,37 @@ def _lower_vertical(
     result["place_diag"]["lower_vertical"] = True
     sim._last_abort = None
     ok = move_lin(
-        sim, place, duration=1.2, physics=True, n_wp=12, lock_joints=lock,
-        guard=lambda: _touching_board(sim, tid),
+        sim, place, duration=1.2, physics=True, n_wp=12, lock_joints=lock, guard=guard,
     )
-    if not ok and getattr(sim, "_last_abort", None) != "board":
+    aborted = getattr(sim, "_last_abort", None)
+    if aborted and aborted != "board":
+        result["place_diag"]["lower_bystander"] = aborted
+        cur = float(sim.qpos()["wrist_roll"])
+        lo, hi = sim.joint_limits()["wrist_roll"]
+        for d in (0.4, -0.4, 0.8, -0.8):
+            _roll_holding(sim, float(np.clip(cur + d, lo, hi)))
+            sim._last_abort = None
+            gpos, _ = sim.site_pose(EE_SITE)
+            q, _ = sim.object_pose(tid)
+            place = [
+                float(gpos[0] + dest_xy[0] - q[0]),
+                float(gpos[1] + dest_xy[1] - q[1]),
+                float(place_z),
+            ]
+            ok = move_lin(
+                sim, place, duration=0.8, physics=True, n_wp=8, lock_joints=lock, guard=guard,
+            )
+            aborted = getattr(sim, "_last_abort", None)
+            if ok or aborted == "board":
+                result["place_diag"]["lower_roll_retry"] = round(d, 2)
+                break
+    if not ok and aborted not in (None, "board"):
+        # Stopped on a neighbor instead of shoving it. Release from here.
+        result["place_diag"]["lower_stopped_clear"] = True
+        return place
+    if not ok and aborted != "board":
         return None
-    if getattr(sim, "_last_abort", None) == "board":
+    if aborted == "board":
         result["place_diag"]["lower_touchdown_early"] = True
     return place
 
@@ -815,15 +885,24 @@ def _touching_board(sim: Sim, tid: str):
 
 
 def _carry_candidates(start, goal, cfg: dict, n_wp: int, lock: tuple[str, ...]):
-    """Locked straight (floored to r≥190 mm), then a higher line, then unlock wrist_flex."""
+    """Carry lines that end on the real goal.
+
+    Midpoints may sit on the 190 mm ring so a high transit does not ask IK
+    for a hover that does not exist. The last point is never floored — that
+    parked the piece 40+ mm off dest and scraped in at place height (b5).
+    """
     n_wp = max(8, int(n_wp))
-    wps = [_floor_wp(wp, cfg) for wp in _line_wps(start, goal, n_wp)]
-    yield wps, lock, "straight"
-    high = [[w[0], w[1], w[2] + 0.03] for w in wps]
-    yield high, lock, "high"
+    raw = _line_wps(start, goal, n_wp)
+    dest = [float(goal[0]), float(goal[1]), float(goal[2])]
+    yield raw, lock, "straight"
+    yield [[w[0], w[1], w[2] + 0.03] for w in raw], lock, "high"
+    ring = [_floor_wp(w, cfg) for w in raw[:-1]] + [dest]
+    if any(abs(a[0] - b[0]) + abs(a[1] - b[1]) > 0.002 for a, b in zip(raw, ring)):
+        yield ring, lock, "ring_then_in"
+        yield [[w[0], w[1], w[2] + 0.03] for w in ring], lock, "ring_then_in_high"
     if "wrist_flex" in lock:
         unlock = tuple(j for j in lock if j != "wrist_flex")
-        yield wps, unlock, "straight_unlock_flex"
+        yield raw, unlock, "straight_unlock_flex"
 
 
 def _transport_to(
@@ -853,9 +932,14 @@ def _transport_to(
                 return True, label
             moved = True
             break
-    goal_f = _floor_wp(goal, cfg)
-    if _carry_lin(sim, goal_f, duration, max(8, n_wp), lock, extract):
+    if _carry_lin(sim, goal, duration, max(8, n_wp), lock, extract):
         return True, "straight"
+    # Near-base dest: a 10 cm hover is often dead while a low pinch is not.
+    low_z = min(float(goal[2]), 0.06)
+    if float(goal[2]) > low_z + 0.008:
+        low = [float(goal[0]), float(goal[1]), low_z]
+        if _carry_lin(sim, low, duration, max(8, n_wp), lock, extract):
+            return True, "low"
     return False, "straight"
 
 
@@ -887,7 +971,8 @@ def bystander_contact(sim: Sim, bodies: list[str]) -> dict | None:
     Vectorized over the contact array so it is cheap enough to run every
     physics step as a motion guard.
     """
-    b1, b2 = sim.contact_bodies()
+    w = gt(sim)
+    b1, b2 = w.contact_bodies()
     if b1.size == 0:
         return None
     by = np.fromiter((sim.body_id(n) for n in bodies), dtype=int)
@@ -900,7 +985,7 @@ def bystander_contact(sim: Sim, bodies: list[str]) -> dict | None:
     return {
         "body": sim.body_name(int(pb)),
         "robot": sim.body_name(int(rb)),
-        "dist_mm": float(sim.data.contact.dist[k] * 1000.0),
+        "dist_mm": float(w.data.contact.dist[k] * 1000.0),
     }
 
 
@@ -1187,7 +1272,7 @@ def physical_descend(sim: Sim, target, duration: float = 1.2, n_wp: int = 1, loc
         cmd = {k: start[k] + (goal[k] - start[k]) * u for k in start}
         sim.set_ctrl(cmd)
         sim.step()
-        force = np.asarray(sim.data.actuator_force, dtype=float)
+        force = sim.actuator_forces()
         np.maximum(peak, np.abs(force), out=peak)
         hits = jaw_contacts(sim, tid)
         if hits and report["first_contact_step"] is None:
@@ -1220,7 +1305,7 @@ def physical_descend(sim: Sim, target, duration: float = 1.2, n_wp: int = 1, loc
     sim.hold(goal)
     for _ in range(20):
         sim.step()
-        force = np.abs(np.asarray(sim.data.actuator_force, dtype=float))
+        force = np.abs(sim.actuator_forces())
         np.maximum(peak, force, out=peak)
         if jaw_contacts(sim, tid) and report["first_contact_step"] is None:
             report["first_contact_step"] = n
@@ -1572,6 +1657,15 @@ def _pinch_xyz(sim: Sim, tid: str, surface: float) -> np.ndarray:
     return np.array([float(com[0]), float(com[1]), z], dtype=float)
 
 
+def _pinch_xyz_base(sim: Sim, tid: str, surface: float) -> np.ndarray:
+    """Fat-end pinch. Body origin is the pedestal; COM sits toward the crown."""
+    com = _piece_com(sim, tid)
+    qpos, _ = sim.object_pose(tid)
+    xy = 0.7 * np.asarray(qpos[:2], dtype=float) + 0.3 * com[:2]
+    z = max(float(surface) + 0.005, float(com[2]) - 0.005)
+    return np.array([float(xy[0]), float(xy[1]), z], dtype=float)
+
+
 def _roll_horizontal_pinch(sim: Sim, com, axis) -> float:
     """wrist_roll so jaws open sideways and wrap the stem above the board."""
     start = sim.qpos()
@@ -1733,6 +1827,30 @@ def _js_extract(sim: Sim, tid: str, hold: dict, closed: float, surface: float) -
     return None
 
 
+def _js_escape_hole(sim: Sim, cfg: dict, tid: str, pose: dict, closed: float) -> dict | None:
+    """Inch the EE outward while holding. A 60 mm jump or JS pan peels the scoop."""
+    del pose
+    base = _arm_base_xy(cfg)
+    lock = ("wrist_roll",)
+    last = {n: sim.qpos()[n] for n in ARM_JOINTS}
+    for _ in range(12):
+        if not grasp_acquired(sim, tid):
+            sim.set_qpos({**last, "gripper": float(closed)}, hold=True)
+            return last if grasp_acquired(sim, tid) else None
+        ee, _ = sim.site_pose(EE_SITE)
+        r = float(np.linalg.norm(ee[:2] - base))
+        # Far enough that +Z extract works; going all the way to 190 mm peels.
+        if r >= 0.140:
+            return {n: sim.qpos()[n] for n in ARM_JOINTS}
+        away = _outward_xy(ee[:2], cfg, 0.006)
+        tgt = [float(away[0]), float(away[1]), float(ee[2])]
+        if not _move_hold(sim, tgt, closed, duration=0.28, n_wp=3, lock=lock, tid=tid):
+            sim.set_qpos({**last, "gripper": float(closed)}, hold=True)
+            return last if grasp_acquired(sim, tid) else None
+        last = {n: sim.qpos()[n] for n in ARM_JOINTS}
+    return last if grasp_acquired(sim, tid) else None
+
+
 def _nest_step_candidates(ee, nest, z: float) -> list[np.ndarray]:
     cur = np.asarray(ee, dtype=float)
     nest = np.asarray(nest, dtype=float)
@@ -1831,6 +1949,69 @@ def _js_step_toward_nest(sim: Sim, tid: str, nest, closed: float, z_min: float =
     return bool(grasp_acquired(sim, tid))
 
 
+def _recover_descend(
+    sim: Sim,
+    cfg: dict,
+    pinch,
+    stem,
+    axis,
+    rec_open: float,
+    lock_r: tuple[str, ...],
+    out: dict,
+) -> np.ndarray | None:
+    """Reach the scoop pinch from a hover that actually IKs.
+
+    The nominal 110 mm / 60 mm-back hover is dead next to the base; the pinch
+    is not. Walk the same family as pick (safer poses first), then the other
+    stem direction. Physics-tracks each kinematic hit; a failed move reseeds.
+    """
+    last_high = None
+    for flip in (False, True):
+        if flip:
+            axis = _scoop_axis(stem, -1.0 if float(axis[0]) * float(stem[0]) >= 0 else 1.0)
+            roll = _roll_horizontal_pinch(sim, pinch, axis)
+            qroll = sim.qpos()
+            qroll["wrist_roll"] = float(roll)
+            qroll["gripper"] = rec_open
+            move_qpos(sim, qroll, duration=0.30, physics=True)
+            out["scoop"] = {
+                "axis": [round(float(v), 3) for v in axis],
+                "roll": round(float(roll), 3),
+                "flipped": True,
+            }
+        roll = float(sim.qpos()["wrist_roll"])
+        ikw = dict(x_axis=axis, ori_weight=0.45, ori_steps=8)
+
+        def _reset():
+            _reset_ik_seed(sim, cfg, keep={"wrist_roll": roll, "gripper": rec_open})
+
+        if not pose_reaches(sim, pinch, lock_joints=lock_r, **ikw):
+            continue
+        hits = reachable_approaches(
+            sim,
+            ray_approach_candidates(pinch, axis[:2]),
+            pinch,
+            reset=_reset,
+            lock_joints=lock_r,
+            **ikw,
+        )
+        for high in hits:
+            last_high = high
+            _reset()
+            if not move_lin(sim, high, duration=0.9, physics=True, n_wp=6, lock_joints=lock_r, **ikw):
+                continue
+            log_state(sim, "recover_pregrasp", extra={"target": _xyz(high), "pinch": _xyz(pinch)})
+            if move_lin(sim, pinch, duration=1.1, physics=True, n_wp=10, lock_joints=lock_r, **ikw):
+                return np.asarray(axis, dtype=float)
+    out["reason"] = "RECOVER_IK"
+    log_state(
+        sim,
+        "fail_recover_pregrasp",
+        extra={"target": _xyz(last_high if last_high is not None else pinch), "pinch": _xyz(pinch)},
+    )
+    return None
+
+
 def recover_to_nest(sim: Sim, cfg: dict, tid: str) -> dict:
     """Approach along the lying stem, pinch across it, drop into the well."""
     p = pickup_cfg(cfg)
@@ -1873,21 +2054,11 @@ def recover_to_nest(sim: Sim, cfg: dict, tid: str) -> dict:
     qroll["wrist_roll"] = float(roll)
     qroll["gripper"] = rec_open
     move_qpos(sim, qroll, duration=0.35, physics=True)
-    axy = axis[:2] / (float(np.linalg.norm(axis[:2])) + 1e-12)
-    high = np.array([float(pinch[0]) - float(axy[0]) * 0.06, float(pinch[1]) - float(axy[1]) * 0.06, 0.11])
-    ikw = dict(x_axis=axis, ori_weight=0.45, ori_steps=8)
     lock_r = ("wrist_roll",)
-    if not move_lin(sim, high, duration=0.9, physics=True, n_wp=6, lock_joints=lock_r, **ikw):
-        out["reason"] = "RECOVER_IK"
-        log_state(sim, "fail_recover_pregrasp", extra={"target": _xyz(high)})
+    axis = _recover_descend(sim, cfg, pinch, stem, axis, rec_open, lock_r, out)
+    if axis is None:
         return out
-    log_state(sim, "recover_pregrasp", extra={"target": _xyz(high), "pinch": _xyz(pinch)})
-    if not move_lin(
-        sim, pinch, duration=1.1, physics=True, n_wp=10, lock_joints=lock_r, **ikw
-    ):
-        out["reason"] = "RECOVER_DESCEND"
-        log_state(sim, "fail_recover_descend")
-        return out
+    ikw = dict(x_axis=axis, ori_weight=0.45, ori_steps=8)
     log_state(sim, "recover_grasp", extra={"pinch": _xyz(pinch), "com": _xyz(com)})
     scoop_q = {n: sim.qpos()[n] for n in ARM_JOINTS}
     _close_hold(sim, closed_g, steps=int(p.get("close_steps", 220)), hold=scoop_q)
@@ -1902,10 +2073,38 @@ def recover_to_nest(sim: Sim, cfg: dict, tid: str) -> dict:
         _close_hold(sim, closed_g, steps=int(p.get("close_steps", 220)), hold=scoop_q)
         log_state(sim, "recover_closed")
     if not grasp_acquired(sim, tid):
+        # COM pinch misses a thin stem. Try the fat pedestal.
+        open_gripper(sim, rec_open, steps=40)
+        pinch = _pinch_xyz_base(sim, tid, surface)
+        axis = _choose_scoop_axis(sim, pinch, stem)
+        roll = _roll_horizontal_pinch(sim, pinch, axis)
+        qroll = sim.qpos()
+        qroll["wrist_roll"] = float(roll)
+        qroll["gripper"] = rec_open
+        move_qpos(sim, qroll, duration=0.30, physics=True)
+        base_out = {}
+        axis2 = _recover_descend(sim, cfg, pinch, stem, axis, rec_open, lock_r, base_out)
+        if axis2 is not None:
+            axis = axis2
+            scoop_q = {n: sim.qpos()[n] for n in ARM_JOINTS}
+            _close_hold(sim, closed_g, steps=int(p.get("close_steps", 220)), hold=scoop_q)
+            log_state(sim, "recover_closed", extra={"pinch": "base"})
+    if not grasp_acquired(sim, tid):
         out["reason"] = "RECOVER_GRASP"
         log_state(sim, "fail_recover_grasp")
         return out
-    hold = _js_extract(sim, tid, scoop_q, closed_g, surface)
+    # Pure +Z extract inside ~190 mm peels the scoop. Walk out first.
+    gpos, _ = sim.site_pose(EE_SITE)
+    if float(np.linalg.norm(gpos[:2] - _arm_base_xy(cfg))) < _WORKSPACE_R_M:
+        escaped = _js_escape_hole(sim, cfg, tid, {n: sim.qpos()[n] for n in ARM_JOINTS}, closed_g)
+        if escaped is None or not grasp_acquired(sim, tid):
+            out["reason"] = "RECOVER_DROP"
+            log_state(sim, "fail_recover_drop")
+            return out
+        scoop_q = escaped
+    qpos, _ = sim.object_pose(tid)
+    already_up = float(qpos[2]) > surface + 0.016 and grasp_acquired(sim, tid)
+    hold = scoop_q if already_up else _js_extract(sim, tid, scoop_q, closed_g, surface)
     if hold is None:
         out["reason"] = "RECOVER_DROP"
         log_state(sim, "fail_recover_drop")
@@ -1914,7 +2113,13 @@ def recover_to_nest(sim: Sim, cfg: dict, tid: str) -> dict:
     log_state(sim, "recover_extract", extra={"xyz": _xyz(qpos)})
 
     gpos, _ = sim.site_pose(EE_SITE)
-    z_carry = max(float(gpos[2]), 0.055, float(nest[2]) + 0.06)
+    # Hole scoop is a low wrap. Climbing to the usual 80 mm hover peels it
+    # whether we skipped extract or just finished it.
+    in_hole = float(np.linalg.norm(gpos[:2] - _arm_base_xy(cfg))) < _WORKSPACE_R_M
+    if in_hole:
+        z_carry = max(float(gpos[2]), 0.040)
+    else:
+        z_carry = max(float(gpos[2]), 0.055, float(nest[2]) + 0.06)
     if float(gpos[2]) < z_carry - 0.004:
         up = [float(gpos[0]), float(gpos[1]), z_carry]
         if not _move_hold(sim, up, closed_g, duration=0.7, n_wp=5, lock=_WRIST_HOLD, tid=tid):
@@ -2141,6 +2346,13 @@ def _after_pick_fail(
     on_dest = bool(dest) and square_of_body(sim, cfg, tid) == dest
     if (
         reason == "TRANSPORT_DROP"
+        and on_dest
+        and _piece_still_upright(sim, tid, surface, tilt_max=0.5)
+    ):
+        # Already over dest. Scooping it into the cup is the wrong recovery.
+        return None
+    if (
+        reason == "TRANSPORT_DROP"
         and int(sc.get("_recover_attempt", 0)) < 2
         and _piece_still_upright(sim, tid, surface, tilt_max=0.5)
         and (sc.get("place_xyz") is not None or not on_dest)
@@ -2279,6 +2491,7 @@ def _jaw_role(name: str) -> str:
 def release_snapshot(sim: Sim, object_id: str | None = None) -> dict:
     """Jaw/piece contact at the current release pose. Evaluation only."""
     tid = object_id or _tid(sim)
+    sim = world_of(sim)
     qpos, qquat = sim.object_pose(tid)
     gpos, _ = sim.site_pose(EE_SITE)
     bid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, tid)
@@ -2334,84 +2547,142 @@ def _xyz(v) -> list[float]:
     return [float(v[0]), float(v[1]), float(v[2])]
 
 
-def find_observe_pose(sim: Sim, cfg: dict, target_xyz) -> list[float] | None:
-    """Reachable wrist pose that still sees target_xyz. Not necessarily overhead.
+def _unique_xyz(cands, tol: float = 0.002) -> list[list[float]]:
+    out: list[list[float]] = []
+    for raw in cands:
+        p = [float(raw[0]), float(raw[1]), float(raw[2])]
+        if any(float(np.linalg.norm(np.asarray(p) - np.asarray(q))) < tol for q in out):
+            continue
+        out.append(p)
+    return out
 
-    Tries the default hover first, then a few heights and outward XY shifts
-    along the base→target ray. Restores qpos.
+
+def hover_approach_candidates(
+    xy,
+    cfg: dict,
+    prefer_z: float,
+    lower_z: tuple[float, ...] = (0.08, 0.06, 0.04, 0.03),
+    ring_zs: tuple[float, ...] | None = None,
+) -> list[list[float]]:
+    """High hover first, then outward, then lower — including outward+low.
+
+    Near the base a 10 cm hover is often dead while a 3 cm pinch is fine.
+    Outward+low is last so mid-board picks still take the overhead pose.
     """
-    p = pickup_cfg(cfg)
     board = cfg["sim"]["board"]
     surface = float(board["surface_z"])
     size = float(board["square_size"])
+    gx, gy = float(xy[0]), float(xy[1])
+    zs = ring_zs if ring_zs is not None else (float(prefer_z),)
+    cands: list[list[float]] = []
+    for extra in (0.0, 0.5 * size, 1.0 * size, 1.5 * size):
+        p = _outward_xy([gx, gy], cfg, extra)
+        for z in zs:
+            cands.append([float(p[0]), float(p[1]), float(z)])
+    for z_off in lower_z:
+        cands.append([gx, gy, surface + float(z_off)])
+    for extra in (0.5 * size, 1.0 * size):
+        p = _outward_xy([gx, gy], cfg, extra)
+        for z_off in (0.06, 0.04):
+            cands.append([float(p[0]), float(p[1]), surface + float(z_off)])
+    return _unique_xyz(cands)
+
+
+def ray_approach_candidates(
+    pinch,
+    back_xy,
+    *,
+    backs: tuple[float, ...] = (0.06, 0.08, 0.045, 0.030),
+    zs: tuple[float, ...] = (0.11, 0.09, 0.07, 0.055),
+) -> list[list[float]]:
+    """Approaches along -back_xy from the pinch. High/far first, then shorter/lower."""
+    axy = np.asarray(back_xy[:2], dtype=float)
+    n = float(np.linalg.norm(axy))
+    if n < 1e-9:
+        axy, n = np.array([1.0, 0.0]), 1.0
+    axy = axy / n
+    px, py = float(pinch[0]), float(pinch[1])
+    cands: list[list[float]] = []
+    for z in zs:
+        for back in backs:
+            cands.append([px - float(axy[0]) * back, py - float(axy[1]) * back, float(z)])
+    return _unique_xyz(cands)
+
+
+def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
+    """Reachable wrist poses that still see target_xyz, safest first."""
+    p = pickup_cfg(cfg)
+    board = cfg["sim"]["board"]
+    surface = float(board["surface_z"])
     observe_z = float(p.get("observe_z", 0.12))
     target = np.asarray(target_xyz, dtype=float)
-    look_z = (observe_z, 0.08)
-    start = sim.qpos()
-    try:
-        for extra in (0.0, 0.5 * size, 1.0 * size, 1.5 * size):
-            xy = _outward_xy(target[:2], cfg, extra)
-            for z_off in look_z:
-                cand = [float(xy[0]), float(xy[1]), surface + z_off]
-                _reset_ik_seed(sim, cfg)
-                if not solve_ik_upright(sim, cand):
-                    continue
-                if wrist_sees_point(sim, target):
-                    return cand
-        return None
-    finally:
-        sim.set_qpos(start, hold=True)
+    cands = hover_approach_candidates(
+        target[:2],
+        cfg,
+        surface + observe_z,
+        lower_z=(),
+        ring_zs=(surface + observe_z, surface + 0.08),
+    )
+    return reachable_approaches(
+        sim,
+        cands,
+        reset=lambda: _reset_ik_seed(sim, cfg),
+        upright=True,
+        accept=lambda _c: wrist_sees_point(sim, target),
+    )
+
+
+def find_observe_pose(sim: Sim, cfg: dict, target_xyz) -> list[float] | None:
+    """Reachable wrist pose that still sees target_xyz. Not necessarily overhead."""
+    hits = find_observe_poses(sim, cfg, target_xyz)
+    return hits[0] if hits else None
 
 
 def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | None:
     """Move to a wrist pose that sees target_xyz. Raise or reseeds if stuck."""
     lock = ("wrist_flex", "wrist_roll")
     obstacles = obstacle_bodies(sim, skip={tid})
-    look = find_observe_pose(sim, cfg, target_xyz)
-    if look is not None and _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=0.8):
-        return look
+
+    def _try(looks, duration: float) -> list[float] | None:
+        for look in looks:
+            if _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=duration):
+                return look
+        return None
+
+    hit = _try(find_observe_poses(sim, cfg, target_xyz), 0.8)
+    if hit is not None:
+        return hit
     _js_raise_ee(sim, z_min=0.12)
-    look = find_observe_pose(sim, cfg, target_xyz)
-    if look is not None and _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=0.8):
-        return look
+    hit = _try(find_observe_poses(sim, cfg, target_xyz), 0.8)
+    if hit is not None:
+        return hit
     seed_vertical(sim, cfg)
-    look = find_observe_pose(sim, cfg, target_xyz)
-    if look is not None and _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=0.9):
-        return look
-    return look if look is not None and _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=0.8) else None
+    return _try(find_observe_poses(sim, cfg, target_xyz), 0.9)
+
+
+def find_pregrasp_poses(sim: Sim, cfg: dict, grasp_xy) -> list[list[float]]:
+    """Reachable pregrasps that can still IK to the grasp, safest first."""
+    p = pickup_cfg(cfg)
+    board = cfg["sim"]["board"]
+    surface = float(board["surface_z"])
+    pre_z = float(p.get("pregrasp_z", 0.10))
+    grasp_z = float(p.get("grasp_z", 0.015))
+    gx, gy = float(grasp_xy[0]), float(grasp_xy[1])
+    grasp = [gx, gy, surface + grasp_z]
+    cands = hover_approach_candidates([gx, gy], cfg, surface + pre_z)
+    return reachable_approaches(
+        sim, cands, grasp, reset=lambda: _reset_ik_seed(sim, cfg), upright=True
+    )
 
 
 def find_pregrasp_pose(sim: Sim, cfg: dict, grasp_xy) -> list[float] | None:
     """Reachable pregrasp that can still IK to the given grasp XY.
 
-    Prefers the default hover height; if that is inside the inner workspace
-    hole, steps outward, then lowers. Restores qpos.
+    Prefers the default hover; if that sits in the near-base hover hole,
+    steps outward, then lower, then outward+low. Restores qpos.
     """
-    p = pickup_cfg(cfg)
-    board = cfg["sim"]["board"]
-    surface = float(board["surface_z"])
-    size = float(board["square_size"])
-    pre_z = float(p.get("pregrasp_z", 0.10))
-    grasp_z = float(p.get("grasp_z", 0.015))
-    gx, gy = float(grasp_xy[0]), float(grasp_xy[1])
-    grasp = [gx, gy, surface + grasp_z]
-    cands: list[list[float]] = []
-    for extra in (0.0, 0.5 * size, 1.0 * size, 1.5 * size):
-        xy = _outward_xy([gx, gy], cfg, extra)
-        cands.append([float(xy[0]), float(xy[1]), surface + pre_z])
-    for z_off in (0.08, 0.06, 0.04, 0.03):
-        cands.append([gx, gy, surface + z_off])
-    start = sim.qpos()
-    try:
-        for cand in cands:
-            _reset_ik_seed(sim, cfg)
-            if not solve_ik_upright(sim, cand):
-                continue
-            if solve_ik_upright(sim, grasp):
-                return cand
-        return None
-    finally:
-        sim.set_qpos(start, hold=True)
+    hits = find_pregrasp_poses(sim, cfg, grasp_xy)
+    return hits[0] if hits else None
 
 
 def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray | None:
@@ -2526,43 +2797,44 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     }
     sim._last_ik_fail = None
 
+    W = world_of(sim)  # evaluator view: collateral, first-collision, neighbor stats
     first_hit = [None]
 
     def _clutter_names() -> list[str]:
         names = []
-        for name in _proxy_body_names(sim):
-            bid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, name)
-            if bid >= 0 and float(sim.data.xpos[bid][2]) > 0.0 and not in_trash(sim.data.xpos[bid], cfg) and not in_well(sim.data.xpos[bid], cfg):
+        for name in _proxy_body_names(W):
+            bid = mujoco.mj_name2id(W.model, mujoco.mjtObj.mjOBJ_BODY, name)
+            if bid >= 0 and float(W.data.xpos[bid][2]) > 0.0 and not in_trash(W.data.xpos[bid], cfg) and not in_well(W.data.xpos[bid], cfg):
                 names.append(name)
-        for i in range(sim.model.nbody):
-            name = mujoco.mj_id2name(sim.model, mujoco.mjtObj.mjOBJ_BODY, i)
+        for i in range(W.model.nbody):
+            name = mujoco.mj_id2name(W.model, mujoco.mjtObj.mjOBJ_BODY, i)
             if not name or name == tid or body_kind(name) is None:
                 continue
-            if float(sim.data.xpos[i][2]) > 0.0 and not in_trash(sim.data.xpos[i], cfg) and not in_well(sim.data.xpos[i], cfg):
+            if float(W.data.xpos[i][2]) > 0.0 and not in_trash(W.data.xpos[i], cfg) and not in_well(W.data.xpos[i], cfg):
                 names.append(name)
         return names
 
     # Fast reject for the per-step hook: with 32 pieces resting on the board
     # there are ~160 contacts per step, almost all piece<->board. Only a
     # clutter piece touching a robot part or the target needs the slow path.
-    tid_bid = sim.body_id(tid)
+    tid_bid = W.body_id(tid)
     inert_ids = np.array(
-        [b for b in (sim.body_id("board"), sim.body_id("floor"), 0) if b >= 0], dtype=int
+        [b for b in (W.body_id("board"), W.body_id("floor"), 0) if b >= 0], dtype=int
     )
     piece_ids = np.array(
         [
             i
-            for i in range(sim.model.nbody)
-            if (sim.body_name(i) or "").startswith("proxy_") or body_kind(sim.body_name(i)) is not None
+            for i in range(W.model.nbody)
+            if (W.body_name(i) or "").startswith("proxy_") or body_kind(W.body_name(i)) is not None
         ],
         dtype=int,
     )
 
     def _clutter_hit_possible() -> bool:
-        b1, b2 = sim.contact_bodies()
+        b1, b2 = W.contact_bodies()
         if b1.size == 0:
             return False
-        z = sim.data.xpos[:, 2]
+        z = W.data.xpos[:, 2]
         live = piece_ids[(z[piece_ids] > 0.0) & (piece_ids != tid_bid)]
         in1 = np.isin(b1, live)
         in2 = np.isin(b2, live)
@@ -2586,23 +2858,23 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
 
         def _part_touching(*bodies: str) -> str | None:
             for b in bodies:
-                for h in sim.contacts_with(b):
-                    part = robot_part_walk(sim, h.get("other"))
+                for h in W.contacts_with(b):
+                    part = robot_part_walk(W, h.get("other"))
                     if part:
                         return part
             return None
 
         for name in _clutter_names():
-            for h in sim.contacts_with(name):
+            for h in W.contacts_with(name):
                 other = h.get("other")
                 if other in (None, "board", "floor", "world"):
                     continue
-                part = robot_part_walk(sim, other)
+                part = robot_part_walk(W, other)
                 if part is None and other != tid:
                     continue
                 if part is None:
                     part = _part_touching(name, tid)
-                sq = square_of_body(sim, cfg, name)
+                sq = square_of_body(W, cfg, name)
                 first_hit[0] = {
                     "body": name,
                     "other": other,
@@ -2641,9 +2913,9 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         stats = []
         any_contact = nb_peak_contact[0]
         for nid in nids:
-            p, q = sim.object_pose(nid)
+            p, q = W.object_pose(nid)
             p0 = np.asarray(starts.get(nid, p[:2]), dtype=float)
-            hits = [h for h in sim.contacts_with(nid) if h["other"] not in ("board", None)]
+            hits = [h for h in W.contacts_with(nid) if h["other"] not in ("board", None)]
             robot_hit = any(
                 h["other"] in ("gripper", "moving_jaw_so101_v1") or (h["other"] or "").startswith("link")
                 for h in hits
@@ -2656,8 +2928,8 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             cl = None
             if with_gap:
                 cl = min(
-                    min_body_gap(sim, nid, "gripper"),
-                    min_body_gap(sim, nid, "moving_jaw_so101_v1"),
+                    min_body_gap(W, nid, "gripper"),
+                    min_body_gap(W, nid, "moving_jaw_so101_v1"),
                 )
                 if nb_min_clear[0] is None:
                     nb_min_clear[0] = cl
@@ -2689,7 +2961,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             _track_neighbors()
 
     def _fill_fail_diag():
-        pos, _ = sim.site_pose(EE_SITE)
+        pos, _ = W.site_pose(EE_SITE)
         reason = result.get("failure_reason")
         stash = getattr(sim, "_last_ik_fail", None)
         ik_reasons = ("IK_FAILURE", "IK_NO_SOLUTION")
@@ -2713,7 +2985,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                     2,
                 )
             if result.get("joint_limit_margin_rad") is None:
-                result["joint_limit_margin_rad"] = joint_limit_margin(sim)
+                result["joint_limit_margin_rad"] = joint_limit_margin(W)
 
         hit = result.get("first_collision") or result.get("transport_first_collision")
         plan = result.get("approach_plan") or {}
@@ -2729,7 +3001,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             clear = dist
             if clear is None and robot and body:
                 try:
-                    clear = round(min_body_gap(sim, robot, body) * 1000.0, 2)
+                    clear = round(min_body_gap(W, robot, body) * 1000.0, 2)
                 except Exception:
                     pass
             result["collision_pair"] = {
@@ -2747,19 +3019,19 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                 "body": blk.get("body"),
                 "dist_mm": blk.get("clearance_mm"),
                 "clearance_mm": blk.get("clearance_mm"),
-                "square": square_of_body(sim, cfg, blk.get("body") or ""),
+                "square": square_of_body(W, cfg, blk.get("body") or ""),
                 "phase": "approach_plan",
             }
         elif reason in collision_reasons:
             clutter = list(result.get("occupied_neighbors") or [])
-            pair = closest_pair(sim, APPROACH_BODIES, clutter) if clutter else None
+            pair = closest_pair(W, APPROACH_BODIES, clutter) if clutter else None
             if pair:
                 result["collision_pair"] = {
                     "robot": pair.get("robot"),
                     "body": pair.get("body"),
                     "dist_mm": pair.get("clearance_mm"),
                     "clearance_mm": pair.get("clearance_mm"),
-                    "square": square_of_body(sim, cfg, pair.get("body") or ""),
+                    "square": square_of_body(W, cfg, pair.get("body") or ""),
                     "phase": getattr(sim, "_pickup_phase", None),
                 }
 
@@ -2768,7 +3040,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     def _collateral_snapshot():
         collateral_start.clear()
         for name in _clutter_names():
-            p, q = sim.object_pose(name)
+            p, q = W.object_pose(name)
             collateral_start[name] = (np.asarray(p, dtype=float).copy(), np.asarray(q, dtype=float).copy())
 
     def _collateral_check():
@@ -2776,7 +3048,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         hits = []
         for name, (p0, _q0) in collateral_start.items():
             try:
-                p, q = sim.object_pose(name)
+                p, q = W.object_pose(name)
             except Exception:
                 continue
             if float(p[2]) <= 0.0 or float(p0[2]) <= 0.0:
@@ -2797,7 +3069,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                 hits.append(
                     {
                         "body": name,
-                        "square": square_of_body(sim, cfg, name),
+                        "square": square_of_body(W, cfg, name),
                         "xy_disp_mm": round(disp, 1),
                         "tilt_deg": round(tilt, 1),
                         "first_contact": first_hit[0] if first_hit[0] and first_hit[0].get("body") == name else None,
@@ -2936,7 +3208,8 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         result["vertical_tilt_deg"] = round(vert["tilt_deg"], 2)
         _pitch_in_place(sim, vert["wrist_flex"])
     grasp_xy = _seeded_grasp_xy(sim, cfg, plan_xy, geom, surface + grasp_z)
-    pre = find_pregrasp_pose(sim, cfg, grasp_xy)
+    pres = find_pregrasp_poses(sim, cfg, grasp_xy)
+    pre = pres[0] if pres else None
     if pre is None:
         result["failure_reason"] = "IK_NO_SOLUTION"
         result["ee_requested"] = _xyz([grasp_xy[0], grasp_xy[1], surface + pre_z])
@@ -2979,6 +3252,20 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         grasp_xy = grasp_plan[:2]
     _plan_keys = ("ok", "roll", "gripper", "n_wp", "tried", "reachable", "rank", "reason", "pre_offset_xy", "block", "statuses", "degraded", "min_gap_mm")
     result["approach_plan"] = {k: approach.get(k) for k in _plan_keys}
+    if not approach["ok"]:
+        for alt in pres[1:]:
+            again = _plan(alt, grasp_plan)
+            if not again.get("ok"):
+                continue
+            approach = again
+            if again.get("pre"):
+                pre = list(again["pre"])
+            if again.get("grasp"):
+                grasp_plan = list(again["grasp"])
+                grasp_xy = grasp_plan[:2]
+            result["approach_plan"] = {k: approach.get(k) for k in _plan_keys}
+            result["approach_alt_pre"] = True
+            break
     if not approach["ok"]:
         seed_vertical(sim, cfg)
         pre = find_pregrasp_pose(sim, cfg, grasp_xy) or pre
@@ -3222,7 +3509,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     def _close_step():
         if prev:
             prev()
-        grip_peak[0] = max(grip_peak[0], abs(float(sim.data.actuator_force[sim._act["gripper"]])))
+        grip_peak[0] = max(grip_peak[0], abs(float(sim.actuator_forces()[sim._act["gripper"]])))
 
     sim.on_step = _close_step
     close_gripper(sim, closed_g, steps=int(p.get("close_steps", 220)))
@@ -3482,7 +3769,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     if (
         grasp_acquired(sim, tid)
         and float(qpos[2]) > surface + clearance
-        and not result.get("transport_standoff")
         and float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) >= 0.04
     ):
         gpos, _ = sim.site_pose(EE_SITE)
@@ -3499,10 +3785,13 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         for _ in range(20):
             sim.step()
         qpos, qquat = sim.object_pose(tid)
-    held_over = bool(grasp_acquired(sim, tid) and qpos[2] > surface + clearance)
     over_dest = float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) < 0.04
-    if result.get("transport_standoff"):
-        over_dest = True
+    # Near-base dests carry low (the 10 cm hover is dead). 40 mm clearance
+    # then called a held piece on dest a drop and scooped it into the cup.
+    held_over = bool(
+        grasp_acquired(sim, tid)
+        and (float(qpos[2]) > surface + 0.012 or over_dest)
+    )
     if populated:
         result["transport_success"] = bool(
             held_over and over_dest and not result["transport_contact_transit"]
@@ -3549,8 +3838,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     ]
     # Aim held piece XY at dest, then lower vertically. Combined diagonal
     # lower would drag the piece by the leftover grasp/carry offset.
-    # Dest inside the near-base hole: carry stopped on the workspace ring;
-    # lower first, then slide in at place height (same radius rule as lift).
     place_z = float(g_close[2]) + place_hover
     standoff = bool(result.get("transport_standoff"))
     # Least-tilted reachable pinch at this hover, then lock and translate.
@@ -3578,24 +3865,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     vertical_place = _lower_vertical(sim, tid, dest_xy, place_z, hold, result, x_axis=keep_place)
     if vertical_place:
         place = vertical_place
-    elif standoff:
-        down = [float(gpos[0]), float(gpos[1]), place_z]
-        if not _carry_lin(sim, down, 0.8, 8, hold, extract):
-            result["failure_reason"] = "IK_FAILURE"
-            result["ik_fail_phase"] = "008_lower"
-            log_state(sim, "fail_lower", extra={"target": _xyz(down)})
-            return _done()
-        gpos, _ = sim.site_pose(EE_SITE)
-        q_hold, _ = sim.object_pose(tid)
-        shift = dest_xy[:2] - q_hold[:2]
-        place = [float(gpos[0] + shift[0]), float(gpos[1] + shift[1]), place_z]
-        result["place_diag"]["lower_target_xy_mm"] = [round(place[0] * 1000, 1), round(place[1] * 1000, 1)]
-        if float(np.hypot(shift[0], shift[1])) > 0.001:
-            if not _carry_lin(sim, place, 1.2, 12, hold, extract):
-                result["failure_reason"] = "IK_FAILURE"
-                result["ik_fail_phase"] = "008_lower"
-                log_state(sim, "fail_lower", extra={"target": _xyz(place)})
-                return _done()
     else:
         align = [float(gpos[0] + shift[0]), float(gpos[1] + shift[1]), float(gpos[2])]
         place = [align[0], align[1], place_z]
@@ -3622,7 +3891,8 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             log_state(sim, "fail_lower", extra={"target": _xyz(place)})
             return _done()
     q_lo, _ = sim.object_pose(tid)
-    if standoff and float(np.hypot(q_lo[0] - dest_xy[0], q_lo[1] - dest_xy[1])) > 0.012:
+    off = float(np.hypot(q_lo[0] - dest_xy[0], q_lo[1] - dest_xy[1]))
+    if standoff and 0.012 < off < 0.022:
         gpos, _ = sim.site_pose(EE_SITE)
         shift = dest_xy[:2] - q_lo[:2]
         inch = [float(gpos[0] + shift[0]), float(gpos[1] + shift[1]), float(gpos[2])]
@@ -3762,9 +4032,12 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     )
     high = [float(gpos[0]), float(gpos[1]), z_up]
     retreated = True
-    if seated and not off_board:
+    near_dest = float(np.hypot(q_rel[0] - dest_xy[0], q_rel[1] - dest_xy[1])) < 0.028
+    if (seated or (upright and near_dest)) and not off_board:
         # Get the pads off the lip, then rise. Skipping that check (or
         # `_safe_lin(skip=tid)`) combs the crown and knocks the piece.
+        # "Seated" needs board contact; a man still on the pads is upright
+        # on dest and must take this path, not a floored +Z.
         leave = _clear_then_rise(sim, cfg, tid, z_min=z_up)
         result["place_diag"]["pad_clear_mm"] = leave.get("pad_clear_mm", 0.0)
         result["place_diag"]["retreat_cleared"] = bool(leave.get("cleared"))
@@ -3870,6 +4143,7 @@ def main():
     parser.add_argument("--random", action="store_true", help="spawn queen at a random on-board XY, not a square")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--video", action="store_true", help="write overview+side mp4 under sim/debug/pickup/")
+    parser.add_argument("--wall", choices=WALLS, default="off", help="controller/world separation (robot.py)")
     args = parser.parse_args()
     cfg = load_config()
     spawn_xy = None
@@ -3883,7 +4157,7 @@ def main():
         from scenario import full_board_scenario
 
         sc = full_board_scenario(perception="vision" if args.vision else "gt")
-    sim = Sim(xml_path=xml, cfg=cfg)
+    sim = open_robot(Sim(xml_path=xml, cfg=cfg), args.wall)
     rec = None
     if args.video:
         tag = "vision" if args.vision else "gt"

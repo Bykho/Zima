@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
-from ik import solve_ik
+from ik import pose_reaches, reachable_approaches, solve_ik
 from mj import DEBUG_DIR, JOINT_NAMES, Sim, load_config
 from squares import square_to_world
 
@@ -261,6 +261,49 @@ def test_cart_speed_near_far():
     )
 
 
+def test_reachable_approach_near_base():
+    """Near-base hover is dead; pinch and a lower/outward approach are not."""
+    import numpy as np
+    from pickup import (
+        find_pregrasp_pose,
+        ray_approach_candidates,
+        seed_vertical,
+        _scoop_axis,
+    )
+
+    cfg = load_config()
+    sim = Sim(cfg=cfg)
+    seed_vertical(sim, cfg, snap=True)
+    a5 = square_to_world("a5", cfg)
+    d4 = square_to_world("d4", cfg)
+    pre_a5 = find_pregrasp_pose(sim, cfg, a5)
+    pre_d4 = find_pregrasp_pose(sim, cfg, d4)
+    b5 = square_to_world("b5", cfg)
+    pinch = [float(b5[0]), float(b5[1]), 0.030]
+    hits = []
+    pinch_ok = False
+    for sign in (1.0, -1.0):
+        axis = _scoop_axis(np.array([1.0, 0.0]), sign)
+        ikw = dict(lock_joints=("wrist_roll",), x_axis=axis, ori_weight=0.45, ori_steps=8)
+        pinch_ok = pose_reaches(sim, pinch, **ikw)
+        if not pinch_ok:
+            continue
+        hits = reachable_approaches(sim, ray_approach_candidates(pinch, axis[:2]), pinch, **ikw)
+        if hits:
+            break
+    far_hits = reachable_approaches(sim, [[0.90, 0.90, 0.11]], [0.90, 0.90, 0.03])
+    sim.close()
+    mid_high = pre_d4 is not None and float(pre_d4[2]) >= 0.10
+    ok = pre_a5 is not None and mid_high and pinch_ok and len(hits) > 0 and far_hits == []
+    return check(
+        "approach search near base",
+        ok,
+        f"a5={None if pre_a5 is None else [round(v, 3) for v in pre_a5]} "
+        f"d4_z={None if pre_d4 is None else round(pre_d4[2], 3)} "
+        f"b5_pinch={pinch_ok} b5_hits={len(hits)} far={len(far_hits)}",
+    )
+
+
 def test_column_descend_tracks_xy():
     import numpy as np
     from ik import EE_SITE, servo_lin, solve_ik
@@ -338,8 +381,177 @@ def test_nest_stands_fallen():
     )
 
 
+def test_place_b5_no_collateral():
+    """One Opera-like place: b7→b5 with a pawn on c6. No full game.
+
+    The old 190 mm carry floor parked the piece on the ring (~c5) and
+    scraped in at table height, knocking c6.
+    """
+    import numpy as np
+    from pickup import FULL_BOARD_XML, execute_move, queen_upright, seed_vertical
+
+    cfg = load_config()
+    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    sim.quiet = True
+    seed_vertical(sim, cfg, snap=True)
+    sim.place_object("pawn_c7", square_to_world("c6", cfg, z=0.02))
+    for _ in range(40):
+        sim.step()
+    c6_0, _ = sim.object_pose("pawn_c7")
+    out = execute_move(
+        sim,
+        cfg,
+        use_vision=False,
+        scenario={
+            "target_id": "pawn_b7",
+            "source": "b7",
+            "dest": "b5",
+            "perception": "gt",
+            "quiet": True,
+        },
+    )
+    c6_1, _ = sim.object_pose("pawn_c7")
+    q, quat = sim.object_pose("pawn_b7")
+    dest = square_to_world("b5", cfg)
+    err = float(np.hypot(q[0] - dest[0], q[1] - dest[1]) * 1000)
+    c6_mm = float(np.hypot(c6_1[0] - c6_0[0], c6_1[1] - c6_0[1]) * 1000)
+    sim.close()
+    coll = out.get("collateral") or []
+    ok = (
+        bool(out.get("success"))
+        and not coll
+        and queen_upright(quat, 0.5)
+        and err < 18.0
+        and c6_mm < 8.0
+    )
+    return check(
+        "b7-b5 place does not knock c6",
+        ok,
+        f"ok={out.get('success')} reason={out.get('failure_reason')} "
+        f"err={err:.1f}mm c6={c6_mm:.1f}mm coll={coll} "
+        f"standoff={out.get('transport_standoff')}",
+    )
+
+
+def test_nxb5_capture():
+    """Opera Nxb5 as one capture: dump b5, land the knight, leave c6/c4/b3."""
+    import numpy as np
+    from episode import play_move
+    from pickup import FULL_BOARD_XML, queen_upright, seed_vertical
+
+    cfg = load_config()
+    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    sim.quiet = True
+    seed_vertical(sim, cfg, snap=True)
+    surface = float(cfg["sim"]["board"]["surface_z"])
+
+    def put(body, sq):
+        sim.place_object(body, square_to_world(sq, cfg, z=surface))
+
+    put("pawn_b7", "b5")
+    put("knight_b1", "c3")
+    put("pawn_c7", "c6")
+    put("bishop_c1", "c4")
+    put("queen_d1", "b3")
+    for _ in range(40):
+        sim.step()
+    nb0 = {n: sim.object_pose(n)[0][:2].copy() for n in ("pawn_c7", "bishop_c1", "queen_d1")}
+    out = play_move(sim, cfg, "c3 b5", use_vision=False)
+    kn, kq = sim.object_pose("knight_b1")
+    dest = square_to_world("b5", cfg)
+    err = float(np.hypot(kn[0] - dest[0], kn[1] - dest[1]) * 1000)
+
+    def disp(name):
+        p, _ = sim.object_pose(name)
+        return float(np.hypot(p[0] - nb0[name][0], p[1] - nb0[name][1]) * 1000)
+
+    c6, c4, b3 = disp("pawn_c7"), disp("bishop_c1"), disp("queen_d1")
+    upright = queen_upright(kq, 0.5)
+    sim.close()
+    ok = (
+        bool(out.get("success"))
+        and not (out.get("collateral") or [])
+        and upright
+        and err < 18.0
+        and c6 < 8.0
+        and c4 < 8.0
+        and b3 < 8.0
+    )
+    return check(
+        "Nxb5 capture does not knock queenside",
+        ok,
+        f"ok={out.get('success')} reason={out.get('failure_reason')} "
+        f"stage={out.get('failure_stage')} err={err:.1f}mm "
+        f"c6={c6:.1f} c4={c4:.1f} b3={b3:.1f}",
+    )
+
+
+def _queenside_capture(move: str, attacker: str, src: str, label: str):
+    """One Opera capture on b5 with c4/b3 still occupied. Not a full game."""
+    import numpy as np
+    from episode import play_move
+    from pickup import FULL_BOARD_XML, queen_upright, seed_vertical
+
+    cfg = load_config()
+    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    sim.quiet = True
+    seed_vertical(sim, cfg, snap=True)
+    surface = float(cfg["sim"]["board"]["surface_z"])
+
+    def put(body, sq):
+        sim.place_object(body, square_to_world(sq, cfg, z=surface))
+
+    put("pawn_b7", "b5")
+    put(attacker, src)
+    put("pawn_c7", "c6")
+    put("bishop_c1", "c4")
+    put("queen_d1", "b3")
+    for _ in range(40):
+        sim.step()
+    neighbors = ("pawn_c7", "bishop_c1", "queen_d1")
+    # The attacker itself is not a neighbor once it leaves src.
+    neighbors = tuple(n for n in neighbors if n != attacker)
+    nb0 = {n: sim.object_pose(n)[0][:2].copy() for n in neighbors}
+    out = play_move(sim, cfg, move, use_vision=False)
+    kn, kq = sim.object_pose(attacker)
+    dest = square_to_world("b5", cfg)
+    err = float(np.hypot(kn[0] - dest[0], kn[1] - dest[1]) * 1000)
+
+    def disp(name):
+        p, _ = sim.object_pose(name)
+        return float(np.hypot(p[0] - nb0[name][0], p[1] - nb0[name][1]) * 1000)
+
+    dmm = {n: disp(n) for n in neighbors}
+    upright = queen_upright(kq, 0.5)
+    sim.close()
+    ok = (
+        bool(out.get("success"))
+        and not (out.get("collateral") or [])
+        and upright
+        and err < 18.0
+        and all(v < 8.0 for v in dmm.values())
+    )
+    extra = " ".join(f"{n.split('_')[0]}={v:.1f}" for n, v in dmm.items())
+    return check(
+        label,
+        ok,
+        f"ok={out.get('success')} reason={out.get('failure_reason')} "
+        f"stage={out.get('failure_stage')} err={err:.1f}mm {extra}",
+    )
+
+
+def test_bxb5_capture():
+    """Opera Bxb5+: bishop from c4, dump b5, leave c6 and Qb3."""
+    return _queenside_capture("c4 b5", "bishop_c1", "c4", "Bxb5 capture does not knock queenside")
+
+
+def test_cxb5_capture():
+    """Opera cxb5: pawn from c6, dump b5, leave bishop c4 and Qb3."""
+    return _queenside_capture("c6 b5", "pawn_c7", "c6", "cxb5 capture does not knock queenside")
+
+
 def test_queen_near_base_place():
-    """b3 sits inside the 190 mm workspace hole (Opera Qb3)."""
+    """b3 pinch is reachable; place on the square, not the 190 mm ring."""
     from pickup import FULL_BOARD_XML, execute_move, queen_upright, seed_vertical
 
     cfg = load_config()
@@ -384,11 +596,16 @@ def main():
         test_unstack_policy(),
         test_home_clears_pieces(),
         test_cart_speed_near_far(),
+        test_reachable_approach_near_base(),
         test_column_descend_tracks_xy(),
     ]
     if not quick:
         results.append(test_wrist_localize())
         results.append(test_nest_stands_fallen())
+        results.append(test_place_b5_no_collateral())
+        results.append(test_nxb5_capture())
+        results.append(test_bxb5_capture())
+        results.append(test_cxb5_capture())
         results.append(test_queen_near_base_place())
     passed = sum(results)
     total = len(results)

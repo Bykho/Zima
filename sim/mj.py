@@ -32,6 +32,7 @@ class Sim:
         xml_path = Path(xml_path or self.cfg.get("sim", {}).get("mjcf", "assets/so101/chess_scene.xml"))
         if not xml_path.is_absolute():
             xml_path = ROOT / xml_path
+        self.xml_path = xml_path
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
         self.data = mujoco.MjData(self.model)
         from fast import clock_scale
@@ -137,6 +138,10 @@ class Sim:
 
     def hold(self, positions: dict[str, float] | None = None):
         self.set_ctrl(positions or self.qpos())
+
+    def actuator_forces(self) -> np.ndarray:
+        """Per-actuator effort (servo load on the real arm)."""
+        return np.asarray(self.data.actuator_force, dtype=float).copy()
 
     def step(self, n: int = 1):
         n = max(1, int(n))

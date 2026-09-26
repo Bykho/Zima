@@ -307,6 +307,84 @@ def solve_ik_upright(sim: Sim, target_pos, lock_joints: tuple[str, ...] = (), **
     return solve_ik(sim, target_pos, lock_joints=lock, **kwargs)
 
 
+# Same gate as solve_ik's polish: 2.5 × 3 mm. A plateau past this is not a pose.
+_REACH_ERR_M = 0.0075
+
+
+def pose_reaches(
+    sim: Sim,
+    target,
+    *,
+    lock_joints: tuple[str, ...] = (),
+    max_err: float = _REACH_ERR_M,
+    restore: bool = True,
+    upright: bool = False,
+    **ik_kwargs,
+) -> bool:
+    """True if IK can put the EE within `max_err` of `target`. Restores qpos."""
+    snap = sim.qpos() if restore else None
+    tgt = np.asarray(target, dtype=float)
+    try:
+        fn = solve_ik_upright if upright else solve_ik
+        ok = bool(fn(sim, tgt, lock_joints=lock_joints, **ik_kwargs))
+        pos, _ = sim.site_pose(EE_SITE)
+        return bool(ok and float(np.linalg.norm(pos - tgt)) <= float(max_err))
+    finally:
+        if snap is not None:
+            sim.set_qpos(snap, hold=True)
+
+
+def reachable_approaches(
+    sim: Sim,
+    candidates,
+    goal=None,
+    *,
+    lock_joints: tuple[str, ...] = (),
+    max_err: float = _REACH_ERR_M,
+    reset=None,
+    accept=None,
+    upright: bool = False,
+    **ik_kwargs,
+) -> list[list[float]]:
+    """Candidates that IK, and from which `goal` still IKs, in caller order.
+
+    The preferred hover is often dead near the base (a 10 cm approach over a5)
+    while the pinch itself is fine. Callers list high/far poses first so the
+    first hit is the safest reachable approach, not a scrape. Restores qpos.
+    """
+    snap = sim.qpos()
+    hits: list[list[float]] = []
+    try:
+        for raw in candidates:
+            cand = [float(raw[0]), float(raw[1]), float(raw[2])]
+            if reset is not None:
+                reset()
+            else:
+                sim.set_qpos(snap, hold=True)
+            if not pose_reaches(
+                sim, cand, lock_joints=lock_joints, max_err=max_err,
+                restore=False, upright=upright, **ik_kwargs,
+            ):
+                continue
+            if goal is not None and not pose_reaches(
+                sim, goal, lock_joints=lock_joints, max_err=max_err,
+                restore=False, upright=upright, **ik_kwargs,
+            ):
+                continue
+            if accept is not None and not accept(cand):
+                continue
+            hits.append(cand)
+        return hits
+    finally:
+        sim.set_qpos(snap, hold=True)
+
+
+def first_reachable_approach(sim: Sim, candidates, goal=None, **kwargs) -> list[float] | None:
+    """First candidate from `reachable_approaches`, or None."""
+    hits = reachable_approaches(sim, candidates, goal, **kwargs)
+    return hits[0] if hits else None
+
+
 def ik_fail_snapshot(sim: Sim, requested) -> dict:
     """EE requested vs actual plus residual and joint-limit margin. No motion."""
     pos, _ = sim.site_pose(EE_SITE)

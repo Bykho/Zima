@@ -34,6 +34,9 @@ def main():
     if not quick:
         steps.append(([str(PY), "sim/pickup.py", "--headless"], "queen pick-place"))
         steps.append(([str(PY), "sim/pickup.py", "--headless", "--vision"], "vision pick-place"))
+        steps.append(
+            ([str(PY), "sim/pickup.py", "--headless", "--vision", "--wall", "cheat"], "vision pick-place (robot wall, cheat)")
+        )
     results = [run(cmd, label) for cmd, label in steps]
     passed = sum(results)
     total = len(results)
