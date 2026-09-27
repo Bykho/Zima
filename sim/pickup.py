@@ -1860,47 +1860,6 @@ def _best_carry_goal(
     return best
 
 
-def _js_step_toward_nest(sim: Sim, tid: str, nest, closed: float, z_min: float = 0.050) -> bool:
-    """Pan/lift in joint space when locked-wrist Cartesian IK has no step."""
-    pose = {n: sim.qpos()[n] for n in ARM_JOINTS}
-    ee0, _ = sim.site_pose(EE_SITE)
-    nest = np.asarray(nest, dtype=float)
-    d0 = float(np.hypot(ee0[0] - nest[0], ee0[1] - nest[1]))
-    limits = sim.joint_limits()
-    best = None
-    best_d = d0
-    trials: list[tuple[str, float]] = []
-    for name, step in (
-        ("shoulder_pan", 0.07),
-        ("shoulder_pan", 0.04),
-        ("shoulder_lift", 0.05),
-        ("elbow_flex", 0.05),
-    ):
-        trials.append((name, step))
-        trials.append((name, -step))
-    snap = {n: sim.qpos()[n] for n in ARM_JOINTS}
-    snap["gripper"] = float(closed)
-    for name, delta in trials:
-        lo, hi = limits[name]
-        nxt = dict(pose)
-        nxt[name] = float(np.clip(float(pose[name]) + delta, lo, hi))
-        if abs(nxt[name] - pose[name]) < 1e-4:
-            continue
-        sim.set_qpos({**nxt, "gripper": float(closed)}, hold=True)
-        ee, _ = sim.site_pose(EE_SITE)
-        if float(ee[2]) < z_min:
-            continue
-        d = float(np.hypot(ee[0] - nest[0], ee[1] - nest[1]))
-        if d < best_d - 0.004:
-            best_d = d
-            best = nxt
-    sim.set_qpos(snap, hold=True)
-    if best is None:
-        return False
-    _move_q_hold(sim, best, closed, duration=0.35)
-    return bool(grasp_acquired(sim, tid))
-
-
 def _recover_descend(
     sim: Sim,
     cfg: dict,
@@ -2086,38 +2045,12 @@ def recover_to_nest(sim: Sim, cfg: dict, tid: str) -> dict:
         if _piece_nest_dist(sim, tid, nest) <= 0.010:
             break
         nxt = _best_carry_goal(sim, tid, nest, z_carry)
-        lock_used = _WRIST_HOLD
         if nxt is None:
-            nxt = _best_carry_goal(sim, tid, nest, z_carry, lock=("wrist_roll",))
-            lock_used = ("wrist_roll",)
-        if nxt is None:
-            nxt = _best_carry_goal(sim, tid, nest, z_carry, lock=())
-            lock_used = ()
-        if nxt is None:
-            ee, _ = sim.site_pose(EE_SITE)
-            dxy = np.asarray(nest[:2], dtype=float) - ee[:2]
-            n = float(np.linalg.norm(dxy))
-            if n < 0.006:
-                break
-            step = min(0.022, n)
-            nxt = np.array(
-                [float(ee[0] + dxy[0] / n * step), float(ee[1] + dxy[1] / n * step), z_carry],
-                dtype=float,
-            )
-            lock_used = ("wrist_roll",)
-        if not _move_hold(sim, nxt, closed_g, duration=0.45, n_wp=3, lock=lock_used, tid=tid):
-            moved = False
-            if lock_used == _WRIST_HOLD and _move_hold(
+            break
+        if not _move_hold(sim, nxt, closed_g, duration=0.45, n_wp=3, lock=_WRIST_HOLD, tid=tid):
+            if not _move_hold(
                 sim, nxt, closed_g, duration=0.5, n_wp=3, lock=("wrist_roll",), tid=tid, require_grasp=False
             ):
-                moved = True
-            elif lock_used and _move_hold(
-                sim, nxt, closed_g, duration=0.5, n_wp=3, lock=(), tid=tid, require_grasp=False
-            ):
-                moved = True
-            elif _js_step_toward_nest(sim, tid, nest, closed_g):
-                moved = True
-            if not moved:
                 out["reason"] = "RECOVER_DROP" if not grasp_acquired(sim, tid) else "RECOVER_TRANSIT"
                 log_state(sim, "fail_recover_transit", extra={"target": _xyz(nxt)})
                 return out
@@ -2132,15 +2065,6 @@ def recover_to_nest(sim: Sim, cfg: dict, tid: str) -> dict:
             log_state(sim, "fail_recover_drop")
             return out
     dist = _piece_nest_dist(sim, tid, nest)
-    if dist > 0.018:
-        for _ in range(16):
-            if not grasp_acquired(sim, tid):
-                break
-            if not _js_step_toward_nest(sim, tid, nest, closed_g):
-                break
-            dist = _piece_nest_dist(sim, tid, nest)
-            if dist <= 0.018:
-                break
     if dist > 0.018:
         out["reason"] = "RECOVER_TRANSIT"
         log_state(sim, "fail_recover_transit", extra={"piece_xy_mm": round(dist * 1000.0, 1)})
