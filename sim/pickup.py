@@ -57,7 +57,7 @@ from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
 from sequence import square_of_body
-from robot import WALLS, jaw_squeezing, open_robot, world_of
+from robot import GRIP_SETTLE_STEPS, GRIP_STILL_RADS, GRIP_STILL_READS, WALLS, jaw_squeezing, open_robot, world_of
 
 JAW_BODIES = ("gripper", "moving_jaw_so101_v1")
 CAMERA_BODIES = ("camera_mount",)
@@ -1316,6 +1316,14 @@ def close_gripper(sim: Sim, closed: float, steps: int = 200):
         sim.step()
     sim.hold({**sim.qpos(), "gripper": closed})
     sim.step(30)
+    # A jaw closing on a piece creeps for a while before it stalls; reading
+    # the grasp before then is a coin flip on the speed threshold.
+    still = 0
+    for _ in range(GRIP_SETTLE_STEPS):
+        still = still + 1 if abs(float(sim.qvel()["gripper"])) < GRIP_STILL_RADS else 0
+        if still >= GRIP_STILL_READS:
+            break
+        sim.step()
 
 
 def open_gripper(sim: Sim, opened: float, steps: int = 80):

@@ -23,6 +23,8 @@ HIDE_Z = -1.0
 EE_SITE = "gripperframe"
 GRIP_LOAD_HELD = 0.08  # |gripper effort| while squeezing (relaxed pawn carry ~0.2); empty close reads ~0.003
 GRIP_STILL_RADS = 0.03  # jaw speed below this with closing load = stalled on a piece
+GRIP_STILL_READS = 3  # consecutive still reads before the close is over
+GRIP_SETTLE_STEPS = 60  # give up waiting after this many steps (0.3 s)
 GRIP_ATTACH_XY_M = 0.025
 PAD_GEOMS = ("fixed_jaw_box4", "moving_jaw_box2")  # opposing contact plates at pinch height
 GRIP_LOAD_RELEASED = 0.04  # below this effort the jaws are no longer holding anything

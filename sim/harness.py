@@ -132,6 +132,29 @@ def _tilt_deg(q) -> float:
     return float(np.degrees(np.arccos(np.clip(zz, -1, 1))))
 
 
+def _pads_in_piece(world, tid: str) -> dict:
+    """Pad centres in the piece body frame (mm), plus contacts per pad."""
+    import mujoco
+
+    from robot import PAD_GEOMS
+
+    m, d = world.model, world.data
+    bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, tid)
+    R, p = d.xmat[bid].reshape(3, 3), d.xpos[bid]
+    out = {}
+    for g in PAD_GEOMS:
+        gid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, g)
+        out[g] = [round(float(v) * 1000, 1) for v in R.T @ (d.geom_xpos[gid] - p)]
+    hits = []
+    for i in range(d.ncon):
+        c = d.contact[i]
+        names = {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, int(c.geom1)), mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, int(c.geom2))}
+        if int(m.geom_bodyid[c.geom1]) == bid or int(m.geom_bodyid[c.geom2]) == bid:
+            hits.append(sorted(n or "?" for n in names))
+    out["contacts"] = hits
+    return out
+
+
 def run_case(args: tuple[dict, str, float]) -> dict:
     case, wall, timeout = args
     os.environ.setdefault("ZIMA_SIM_CLOCK", "1")
@@ -157,13 +180,15 @@ def run_case(args: tuple[dict, str, float]) -> dict:
         import perceive
         import pickup
         from mj import Sim, load_config
-        from robot import open_robot, world_of
+        from robot import jaw_squeezing, open_robot, world_of
         from sequence import occupied_squares
         from squares import square_to_world
 
         orig_log = pickup.log_state
 
         track: list[list] = []
+        close: list[dict] = []
+        row["close"] = close
 
         def _log(sim, name, extra=None):
             phases.append((name, time.time()))
@@ -173,6 +198,8 @@ def run_case(args: tuple[dict, str, float]) -> dict:
                 track.append([name, round(_tilt_deg(quat)), round(pickup.gripper_tilt_deg(sim)), [round(float(v) * 1000) for v in q]])
             except Exception:  # noqa: BLE001 — target not a body (e.g. before setup)
                 pass
+            if name in ("005_gripper_closed", "006_lift") and tid:
+                close.append(_pads_in_piece(world_of(sim), tid) | {"phase": name, "tilt": round(_tilt_deg(world_of(sim).object_pose(tid)[1]), 1), "extra": extra, "squeezing": bool(jaw_squeezing(sim))})
             return orig_log(sim, name, extra)
 
         pickup.log_state = _log
@@ -244,6 +271,8 @@ def run_case(args: tuple[dict, str, float]) -> dict:
             disturbed=disturbed,
             claimed=bool(r.get("success")),
             reason=r.get("failure_reason"),
+            fallen_after=r.get("fallen_after"),
+            grasp_check=r.get("grasp_check"),
             stage=r.get("failure_stage"),
             capture=victim is not None,
             plumb=r.get("plumb"),
