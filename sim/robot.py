@@ -94,14 +94,12 @@ class Robot(Sim):
         self._free = piece_free_joints(self.model)
         self._piece_names = {mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, int(self.model.jnt_bodyid[j])) for j in self._free}
         self.known: set[str] = set(self._piece_names) if self.cheat_state else set()
+        self.last_seen: dict[str, np.ndarray] = {}
         self.held: str | None = None
         self._held_off = None
         self._slack = 0
         if not self.cheat_state:
-            for j in self._free:
-                adr = int(self.model.jnt_qposadr[j])
-                self.data.qpos[adr : adr + 3] = [0.0, 0.0, HIDE_Z]
-                self.data.qpos[adr + 3 : adr + 7] = [1.0, 0.0, 0.0, 0.0]
+            self._hide_all()
         self.data.ctrl[:] = world.data.ctrl
         self._sync()
 
@@ -160,8 +158,22 @@ class Robot(Sim):
             self.known.add(body)
         return ok
 
+    def _hide_xyz(self, body: str) -> list[float]:
+        """Unperceived bodies wait apart below the table (a shared spot explodes the contact solver)."""
+        k = sorted(self._piece_names).index(body)
+        return [5.0 + 0.2 * k, 0.0, HIDE_Z]
+
+    def _hide_all(self) -> None:
+        for j in self._free:
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, int(self.model.jnt_bodyid[j]))
+            adr = int(self.model.jnt_qposadr[j])
+            self.data.qpos[adr : adr + 3] = self._hide_xyz(name)
+            self.data.qpos[adr + 3 : adr + 7] = [1.0, 0.0, 0.0, 0.0]
+
     def forget(self, body: str) -> None:
-        super().place_object(body, [0.0, 0.0, HIDE_Z])
+        if body in self.known:
+            self.last_seen[body] = np.array(super().object_pose(body)[0][:2], dtype=float)
+        super().place_object(body, self._hide_xyz(body))
         self.known.discard(body)
 
     def object_pose(self, body: str):
@@ -281,9 +293,10 @@ class Robot(Sim):
         self._world.reset()
         super().reset()
         if not self.cheat_state:
-            for j in self._free:
-                adr = int(self.model.jnt_qposadr[j])
-                self.data.qpos[adr : adr + 3] = [0.0, 0.0, HIDE_Z]
+            self._hide_all()
+            self.known.clear()
+            self.last_seen.clear()
+            self.detach()
         self._sync()
 
     def close(self):

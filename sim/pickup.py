@@ -2392,6 +2392,14 @@ def _after_place_fail(
     if failed.get("failure_reason") == "RELEASE_FAILURE":
         return None
     dest = sc.get("dest")
+    if _perceiving(sim) and tid not in sim.known:
+        from perceive import perceive_board
+
+        perceive_board(sim, cfg)
+        if tid not in sim.known:
+            failed["failure_reason"] = "PIECE_LOST"
+            failed["failure_stage"] = "place"
+            return None
     qpos, quat = sim.object_pose(tid)
     dest_xy = square_to_world(dest, cfg, z=surface) if dest else None
     near_dest = bool(dest_xy) and float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) < 0.028

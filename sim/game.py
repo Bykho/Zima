@@ -35,6 +35,7 @@ from episode import discard_square, occupancy_text, play_move
 from fast import clock_scale
 from mj import DEBUG_DIR, Sim, load_config
 from pickup import FULL_BOARD_XML, seed_vertical
+from robot import WALLS, open_robot, world_of
 from sequence import stow_idle_free_bodies
 
 _GAMES = {
@@ -189,6 +190,7 @@ def main() -> int:
         action="store_true",
         help="keep playing after a physical fail (collateral, drop, …)",
     )
+    parser.add_argument("--wall", choices=WALLS, default="off", help="controller/world separation (robot.py)")
     args = parser.parse_args()
     use_vision = bool(args.vision) and not args.gt
     want_view = not args.headless
@@ -216,7 +218,7 @@ def main() -> int:
         print("keep-going: on  (scored fails do not stop the game)")
 
     cfg = load_config()
-    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    sim = open_robot(Sim(xml_path=FULL_BOARD_XML, cfg=cfg), args.wall)
     sim.quiet = True
     stow_idle_free_bodies(sim, cfg)
     seed_vertical(sim, cfg, snap=True)
@@ -225,7 +227,7 @@ def main() -> int:
     if want_view:
         import mujoco.viewer
 
-        viewer = mujoco.viewer.launch_passive(sim.model, sim.data)
+        viewer = mujoco.viewer.launch_passive(world_of(sim).model, world_of(sim).data)
         _hook_viewer(sim, viewer)
 
     print(occupancy_text(sim, cfg))

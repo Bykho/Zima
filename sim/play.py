@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "sim"))
 from episode import occupancy_text, play_move
 from mj import Sim, load_config
 from pickup import FULL_BOARD_XML, seed_vertical
+from robot import WALLS, open_robot, world_of
 from sequence import stow_idle_free_bodies
 
 
@@ -190,6 +191,7 @@ def main() -> int:
     parser.add_argument("--view", action="store_true", help="open MuJoCo viewer (default in interactive mode)")
     parser.add_argument("--headless", action="store_true", help="no viewer")
     parser.add_argument("--speed", type=float, default=None, help="video clock (2 = 2x dt). omit for real-time")
+    parser.add_argument("--wall", choices=WALLS, default="off", help="controller/world separation (robot.py)")
     args = parser.parse_args()
     interactive = not args.moves
     want_view = (not args.headless) and (args.view or interactive)
@@ -205,7 +207,7 @@ def main() -> int:
         _reexec_mjpython()
 
     cfg = load_config()
-    sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    sim = open_robot(Sim(xml_path=FULL_BOARD_XML, cfg=cfg), args.wall)
     # Free pawn/rook/… bodies spawn under e5 in the XML. Arm seeding steps
     # physics and they pop onto the square, so `board` prints a ghost P.
     stow_idle_free_bodies(sim, cfg)
@@ -217,7 +219,7 @@ def main() -> int:
     if want_view:
         import mujoco.viewer
 
-        viewer = mujoco.viewer.launch_passive(sim.model, sim.data)
+        viewer = mujoco.viewer.launch_passive(world_of(sim).model, world_of(sim).data)
         _hook_viewer(sim, viewer)
 
     print(occupancy_text(sim, cfg))

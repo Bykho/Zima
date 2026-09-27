@@ -104,7 +104,11 @@ def empty_heightmap(cfg: dict, cell: float = CELL_M, margin: float = MARGIN_M) -
 
 def integrate(hm: HeightMap, obs: RgbdObservation) -> int:
     """Max-fuse one view into the map. Returns points used."""
-    pts = unproject(obs)
+    return integrate_points(hm, unproject(obs))
+
+
+def integrate_points(hm: HeightMap, pts: np.ndarray) -> int:
+    """Max-fuse world points into the map. Returns points used."""
     if len(pts) == 0:
         return 0
     h = pts[:, 2] - hm.surface_z

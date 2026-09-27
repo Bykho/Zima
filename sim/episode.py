@@ -5,6 +5,7 @@ from __future__ import annotations
 from metrics import annotate_episode
 from pickup import (
     _js_raise_ee,
+    _perceiving,
     execute_move,
     in_trash,
     open_gripper,
@@ -505,6 +506,12 @@ def restack_parked(sim, cfg: dict, frames: list[dict]) -> dict:
 
 def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
     """Parse a text move, run it through run_episode on the live board. No chess rules."""
+    scan_info = None
+    if _perceiving(sim):
+        from perceive import perceive_board
+
+        seen = perceive_board(sim, cfg)
+        scan_info = {"views": seen["views"], "looked": seen["looked"], "pieces": len(seen["pieces"])}
     try:
         src, dst = parse_move(text)
     except ValueError as exc:
@@ -591,6 +598,7 @@ def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
     result["piece"] = kind
     result["captured"] = captured
     result["occupancy"] = occupancy_text(sim, cfg)
+    result["board_scan"] = scan_info
     if result.get("success"):
         result["failure_stage"] = None
     else:
