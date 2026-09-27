@@ -335,14 +335,25 @@ def summarize(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _child(args, conn) -> None:
+def _fail_row(args, reason: str, stage: str, t: float) -> dict:
+    case, wall, _ = args
+    return {"id": case["id"], "move": case["move"], "wall": wall, "plies_before": len(case["setup"]),
+            "ok": False, "claimed": False, "reason": reason, "stage": stage, "t": t, "phases": {}}
+
+
+def _child(fn, args, conn) -> None:
     global _PHASES
     _PHASES = conn
-    conn.send(("row", run_case(args)))
+    conn.send(("row", fn(args)))
 
 
-def _run_all(ctx, work: list, jobs: int):
-    """One process per episode, at most `jobs` at once, killed by the parent on memory or time."""
+def run_guarded(fn, work: list, jobs: int, timeout_of, fail_row):
+    """fn(args) per item in its own process, at most `jobs` at once, killed by the parent on memory or time.
+
+    A killed item yields fail_row(args, reason, stage, seconds).
+    """
+    os.environ["PYTHONHASHSEED"] = "0"  # set iteration order feeds association and planning; runs must repeat
+    ctx = mp.get_context("spawn")
     queue = list(work)
     live: dict = {}  # pid -> dict(proc, conn, args, t0, stage, peak)
     while queue or live:
@@ -350,7 +361,7 @@ def _run_all(ctx, work: list, jobs: int):
         while queue and len(live) < jobs and total + WORKER_MEM_CAP_GB <= TOTAL_MEM_CAP_GB:
             a = queue.pop(0)
             parent, child = ctx.Pipe(duplex=False)
-            proc = ctx.Process(target=_child, args=(a, child), daemon=True)
+            proc = ctx.Process(target=_child, args=(fn, a, child), daemon=True)
             proc.start()
             child.close()
             live[proc.pid] = dict(proc=proc, conn=parent, args=a, t0=time.time(), stage="setup", peak=0.0)
@@ -371,9 +382,8 @@ def _run_all(ctx, work: list, jobs: int):
                         row = val
             except (EOFError, OSError):
                 pass
-            case, wall, timeout = w["args"]
             reason = ("MEM_LIMIT" if use[pid] > WORKER_MEM_CAP_GB or (over and pid == biggest)
-                      else "TIMEOUT" if time.time() - w["t0"] > timeout + 30 else None)
+                      else "TIMEOUT" if time.time() - w["t0"] > timeout_of(w["args"]) else None)
             if row is None and reason:
                 w["proc"].kill()
             elif row is None and w["proc"].is_alive():
@@ -382,9 +392,7 @@ def _run_all(ctx, work: list, jobs: int):
             w["conn"].close()
             del live[pid]
             if row is None:
-                row = {"id": case["id"], "move": case["move"], "wall": wall, "plies_before": len(case["setup"]),
-                       "ok": False, "claimed": False, "reason": reason or "CRASH", "stage": w["stage"],
-                       "t": round(time.time() - w["t0"], 1), "phases": {}}
+                row = fail_row(w["args"], reason or "CRASH", w["stage"], round(time.time() - w["t0"], 1))
             row["peak_gb"] = round(w["peak"], 2)
             yield row
 
@@ -409,9 +417,7 @@ def main() -> int:
     path.write_text("")
     rows = []
     t0 = time.time()
-    os.environ["PYTHONHASHSEED"] = "0"  # set iteration order feeds association and planning; runs must repeat
-    ctx = mp.get_context("spawn")
-    for row in _run_all(ctx, work, args.jobs):
+    for row in run_guarded(run_case, work, args.jobs, lambda a: a[2] + 30, _fail_row):
         rows.append(row)
         with path.open("a") as f:
             f.write(json.dumps(row, default=str) + "\n")

@@ -11,17 +11,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import multiprocessing as mp
 import os
-import signal
 import sys
-import threading
 import time
 from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
+
+from harness import run_guarded  # noqa: E402
 
 OUT = ROOT / "sim" / "debug" / "grasp_bench"
 BODIES = {"pawn": "pawn_e2", "rook": "rook_h1", "knight": "knight_g1", "bishop": "bishop_c1", "queen": "queen_d1", "king": "king_e1"}
@@ -31,14 +30,8 @@ HELD_TILT_DEG = 15.0
 def run_one(args: tuple[str, float, float | None, str, float | None, str]) -> dict:
     kind, yaw, height, square, closed, dest = args
     os.environ.setdefault("ZIMA_SIM_CLOCK", "1")
-    from harness import MemoryLimit, _pads_in_piece, _tilt_deg, _watch_memory
+    from harness import _pads_in_piece, _tilt_deg
 
-    def _mem(*_):
-        raise MemoryLimit
-
-    signal.signal(signal.SIGUSR1, _mem)
-    done = threading.Event()
-    threading.Thread(target=_watch_memory, args=(threading.get_ident(), done), daemon=True).start()
     row = {"kind": kind, "yaw": yaw, "height_mm": None if height is None else round(height * 1000, 1), "square": square}
     t0 = time.time()
     try:
@@ -93,14 +86,16 @@ def run_one(args: tuple[str, float, float | None, str, float | None, str]) -> di
             plumb=r.get("plumb"),
             held=bool(r.get("world_success")),
         )
-    except MemoryLimit:
-        row.update(reason="MEM_LIMIT", held=False)
     except Exception as e:  # noqa: BLE001 — a crash is a result
         row.update(reason=f"EXC {type(e).__name__}: {str(e)[:120]}", held=False)
-    finally:
-        done.set()
     row["t"] = round(time.time() - t0, 1)
     return row
+
+
+def _fail_row(args, reason: str, stage: str, t: float) -> dict:
+    kind, yaw, height, square, _, _ = args
+    return {"kind": kind, "yaw": yaw, "height_mm": None if height is None else round(height * 1000, 1),
+            "square": square, "reason": f"{reason} @ {stage}", "held": False, "t": t}
 
 
 def main() -> None:
@@ -118,12 +113,8 @@ def main() -> None:
     yaws = [float(a) for a in args.yaws.split(",")]
     heights = [float(h) / 1000 for h in args.heights.split(",")] if args.heights else [None]
     work = [(k, y, h, args.square, args.closed, args.dest) for k in kinds for h in heights for y in yaws]
-    os.environ["PYTHONHASHSEED"] = "0"
     OUT.mkdir(parents=True, exist_ok=True)
-    rows = []
-    with mp.get_context("spawn").Pool(args.jobs, maxtasksperchild=1) as pool:
-        for row in pool.imap_unordered(run_one, work):
-            rows.append(row)
+    rows = list(run_guarded(run_one, work, args.jobs, lambda a: 120.0, _fail_row))
     rows.sort(key=lambda r: (r["kind"], r["height_mm"] or 0, r["yaw"]))
     (OUT / f"{args.tag}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     table = defaultdict(list)
