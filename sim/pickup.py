@@ -2170,6 +2170,10 @@ def _recover_fallen_then_finish(
     qpos, _ = sim.object_pose(tid)
     if float(qpos[2]) < surface - 0.02:
         return None
+    if not pickup_cfg(cfg).get("recover_fallen", False):
+        failed["fallen_after"] = failed.get("failure_reason")
+        failed["failure_reason"] = "PIECE_FALLEN"
+        return None
     log_state(sim, "recover_start", extra={"after": failed.get("failure_reason")})
     rec = {"ok": False}
     for _try in range(2):

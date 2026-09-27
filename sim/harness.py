@@ -7,7 +7,7 @@ through the robot wall. A fresh process per case keeps episodes independent.
 
   python sim/harness.py                              # opening suite, cheat + perception
   python sim/harness.py --suite opera --walls perception
-  python sim/harness.py --suite all --jobs 8 --tag baseline
+  python sim/harness.py --suite all --jobs 5 --tag baseline
 """
 
 from __future__ import annotations
@@ -16,7 +16,9 @@ import argparse
 import json
 import multiprocessing as mp
 import os
+import resource
 import signal
+import threading
 import traceback
 import sys
 import time
@@ -35,6 +37,24 @@ OPENING = [
 GAMES = ("opera", "immortal", "evergreen")
 DISPLACED_MM = 8.0
 TILTED_DEG = 30.0
+# A healthy episode peaks near 1.6 GB; one runaway once took the machine to 67 GB.
+WORKER_MEM_CAP_GB = float(os.environ.get("ZIMA_MEM_CAP_GB", 4.0))
+
+
+class MemoryLimit(Exception):
+    pass
+
+
+def _peak_gb() -> float:
+    kb = 1 if sys.platform == "darwin" else 1024
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * kb / 1e9
+
+
+def _watch_memory(main_ident: int, done: threading.Event) -> None:
+    while not done.wait(0.25):
+        if _peak_gb() > WORKER_MEM_CAP_GB:
+            signal.pthread_kill(main_ident, signal.SIGUSR1)
+            return
 
 
 def game_cases(name: str) -> list[dict]:
@@ -119,7 +139,13 @@ def run_case(args: tuple[dict, str, float]) -> dict:
     def _alarm(*_):
         raise TimeoutError
 
+    def _mem(*_):
+        raise MemoryLimit
+
     signal.signal(signal.SIGALRM, _alarm)
+    signal.signal(signal.SIGUSR1, _mem)
+    done = threading.Event()
+    threading.Thread(target=_watch_memory, args=(threading.get_ident(), done), daemon=True).start()
     row = {"id": case["id"], "move": case["move"], "wall": wall, "plies_before": len(case["setup"])}
     t0 = time.time()
     phases: list[tuple[str, float]] = []
@@ -225,11 +251,15 @@ def run_case(args: tuple[dict, str, float]) -> dict:
         )
     except TimeoutError:
         row.update(ok=False, claimed=False, reason="TIMEOUT", stage="timeout")
+    except MemoryLimit:
+        row.update(ok=False, claimed=False, reason="MEM_LIMIT", stage=phases[-1][0] if phases else "setup")
     except Exception as e:  # noqa: BLE001 — a crash is a result, not a harness failure
         row.update(ok=False, claimed=False, reason=f"EXC {type(e).__name__}", stage="crash", error=str(e)[:300],
                    trace=traceback.format_exc(limit=-6))
     finally:
         signal.alarm(0)
+        done.set()
+    row["peak_gb"] = round(_peak_gb(), 2)
     row["t"] = round(time.time() - t0, 1)
     row["phases"] = _phase_times(phases, t0)
     return row
@@ -283,7 +313,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--suite", default="opening", help="opening | opera | immortal | evergreen | games | core (opening+opera) | all")
     ap.add_argument("--walls", default="cheat,perception", help="comma list of robot walls")
-    ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) - 2))
+    ap.add_argument("--jobs", type=int, default=5)
     ap.add_argument("--timeout", type=float, default=90.0, help="seconds per case")
     ap.add_argument("--only", default="", help="comma-separated substrings; keep cases whose id contains any")
     ap.add_argument("--tag", default="latest")

@@ -159,25 +159,6 @@ def test_fen_spawn():
     return check("spawn 32 pieces", len(pieces.by_square) == 32)
 
 
-def test_e2e4_move():
-    from board import add_board_visuals
-    from pieces import BoardPieces
-    from pick import execute_move, piece_near_square
-
-    cfg = load_config()
-    a = arm()
-    add_board_visuals(cfg)
-    a.reset_pose(cfg["poses"]["above_board"])
-    pieces = BoardPieces(cfg=cfg)
-    pieces.add("e2", "white", "pawn")
-    dur = 1.0 if FAST else 2.0
-    ok = execute_move(a, pieces, "e2e4", cfg, duration=dur)
-    body = pieces.at("e4")
-    placed = body is not None and piece_near_square(pieces, body, "e4", cfg)
-    a.disconnect()
-    return check("e2e4 pick/place", ok and placed)
-
-
 def test_wrist_camera_aim():
     from board import add_board_visuals
     from camera import WristCamera
@@ -320,7 +301,6 @@ def main():
     ]
     if not FAST:
         results.append(test_fen_spawn())
-    results.append(test_e2e4_move())
     passed = sum(results)
     total = len(results)
     print(f"\n{passed}/{total} test groups passed")

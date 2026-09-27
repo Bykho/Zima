@@ -26,6 +26,9 @@ sim:
     gripper_release: 0.30
     # Extra tries if a miss/drop leaves the piece upright on the board.
     grasp_retries: 1
+    # Scoop a knocked-over piece into the nest cup and stand it up. Off: it
+    # has not completed a single in-game recovery; a fall ends the move.
+    recover_fallen: false
     gripper_closed: -0.12
     close_steps: 220
     lift_clearance: 0.04
