@@ -34,6 +34,7 @@ AIRBORNE_TILT_DEG = 35.0
 PLUMB_END_M = 0.03
 PLUMB_STEP_M = 0.008
 PLUMB_JOINT_STEP_RAD = 0.2  # larger jump between neighbouring waypoints = IK branch switch
+PLUMB_BISECT_DEPTH = 3  # halve a jumping step down to 1 mm before calling it a switch
 PLUMB_POS_TOL_M = 0.003
 PLUMB_GAP_M = 0.004
 PLUMB_LOCK = ("wrist_roll",)
@@ -87,6 +88,34 @@ def _wps(a, b) -> list[np.ndarray]:
     return [a + (b - a) * ((i + 1) / n) for i in range(n)]
 
 
+def _bridge(sim, a, b, prev: dict, v_local, tilt_max: float, where: dict, depth: int) -> list[dict] | None:
+    """Joint states from `prev` (at EE `a`) to EE `b`, halving the step while a joint jumps.
+
+    A steep but continuous stretch shrinks when halved; an IK branch flip
+    does not, and is refused once the step is down to PLUMB_STEP_M / 2**depth.
+    """
+    sim.set_qpos(prev, hold=True)
+    if not solve_plumb(sim, b, v_local, tilt_max):
+        gpos, _ = sim.site_pose(EE_SITE)
+        sim.plumb_fail = {**where, "why": "ik", "tilt": round(_tilt_deg(sim, v_local), 1),
+                          "pos_mm": round(float(np.linalg.norm(np.asarray(gpos) - b)) * 1000, 1)}
+        return None
+    q = sim.qpos()
+    q = {n: float(q[n]) for n in ARM_JOINTS}
+    jump = max(abs(q[n] - prev[n]) for n in ARM_JOINTS)
+    if jump <= PLUMB_JOINT_STEP_RAD:
+        return [q]
+    if depth == 0:
+        sim.plumb_fail = {**where, "why": "jump", "rad": round(jump, 2)}
+        return None
+    mid = 0.5 * (np.asarray(a, dtype=float) + np.asarray(b, dtype=float))
+    first = _bridge(sim, a, mid, prev, v_local, tilt_max, where, depth - 1)
+    if first is None:
+        return None
+    second = _bridge(sim, mid, b, first[-1], v_local, tilt_max, where, depth - 1)
+    return None if second is None else first + second
+
+
 def plan(sim, points, v_local, avoid: list[str], gap: float = PLUMB_GAP_M) -> list[dict] | None:
     """Joint chain along straight EE segments through `points`, or None. Restores qpos.
 
@@ -103,25 +132,21 @@ def plan(sim, points, v_local, avoid: list[str], gap: float = PLUMB_GAP_M) -> li
         a = np.asarray(start, dtype=float)
         last_gap = neighbor_approach_gap(sim, avoid) if avoid else 1.0
         for seg, (b, tilt_max) in enumerate(points):
+            here = a
             for k, wp in enumerate(_wps(a, b)):
                 where = {"seg": seg, "wp": k, "z": round(float(wp[2]), 3)}
-                if not solve_plumb(sim, wp, v_local, tilt_max):
-                    gpos, _ = sim.site_pose(EE_SITE)
-                    sim.plumb_fail = {**where, "why": "ik", "tilt": round(_tilt_deg(sim, v_local), 1),
-                                      "pos_mm": round(float(np.linalg.norm(np.asarray(gpos) - wp)) * 1000, 1)}
+                steps = _bridge(sim, here, wp, prev, v_local, tilt_max, where, PLUMB_BISECT_DEPTH)
+                if steps is None:
                     return None
-                q = sim.qpos()
-                jump = max(abs(float(q[n]) - prev[n]) for n in ARM_JOINTS)
-                if jump > PLUMB_JOINT_STEP_RAD:
-                    sim.plumb_fail = {**where, "why": "jump", "rad": round(jump, 2)}
-                    return None
-                g = neighbor_approach_gap(sim, avoid) if avoid else 1.0
-                if g < gap and g < last_gap - 0.001:
-                    sim.plumb_fail = {**where, "why": "gap", "mm": round(g * 1000, 1)}
-                    return None
-                last_gap = g
-                chain.append({n: float(q[n]) for n in ARM_JOINTS})
-                prev = chain[-1]
+                for q in steps:
+                    sim.set_qpos(q, hold=True)
+                    g = neighbor_approach_gap(sim, avoid) if avoid else 1.0
+                    if g < gap and g < last_gap - 0.001:
+                        sim.plumb_fail = {**where, "why": "gap", "mm": round(g * 1000, 1)}
+                        return None
+                    last_gap = g
+                chain.extend(steps)
+                prev, here = chain[-1], wp
             a = np.asarray(b, dtype=float)
         return chain
     finally:

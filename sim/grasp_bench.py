@@ -1,10 +1,10 @@
-"""Grasp + lift of one piece alone on the board, swept over piece yaw and grasp height.
+"""One move of a single piece on an empty board, swept over piece yaw and grasp height.
 
   python sim/grasp_bench.py                       # every kind, 12 yaws, table heights
   python sim/grasp_bench.py --kinds knight --heights 6,10,14,18,22 --tag knight_h
 
-Cheat wall, so only the grasp varies. Scores from the world: held after lift and
-tilt at close / after lift.
+Cheat wall, so only the grasp varies. Scored from the world (piece upright on
+dest); the carry tilt is the worst in-hand tilt from lift to lower.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ BODIES = {"pawn": "pawn_e2", "rook": "rook_h1", "knight": "knight_g1", "bishop":
 HELD_TILT_DEG = 15.0
 
 
-def run_one(args: tuple[str, float, float | None, str, float | None]) -> dict:
-    kind, yaw, height, square, closed = args
+def run_one(args: tuple[str, float, float | None, str, float | None, str]) -> dict:
+    kind, yaw, height, square, closed, dest = args
     os.environ.setdefault("ZIMA_SIM_CLOCK", "1")
     from harness import MemoryLimit, _pads_in_piece, _tilt_deg, _watch_memory
 
@@ -58,12 +58,14 @@ def run_one(args: tuple[str, float, float | None, str, float | None]) -> dict:
         sim.quiet = True
         pickup.seed_vertical(sim, cfg, snap=True)
         seen: dict[str, dict] = {}
+        tilts: list[tuple[str, float]] = []
         orig = pickup.log_state
 
         def _log(s, name, extra=None):
+            w = world_of(s)
+            tilts.append((name, round(_tilt_deg(w.object_pose(body)[1]), 1)))
             if name in ("005_gripper_closed", "006_lift"):
-                w = world_of(s)
-                seen[name] = _pads_in_piece(w, body) | {"tilt": round(_tilt_deg(w.object_pose(body)[1]), 1), "squeezing": bool(jaw_squeezing(s))}
+                seen[name] = _pads_in_piece(w, body) | {"tilt": tilts[-1][1], "squeezing": bool(jaw_squeezing(s))}
             return orig(s, name, extra)
 
         pickup.log_state = _log
@@ -73,8 +75,8 @@ def run_one(args: tuple[str, float, float | None, str, float | None]) -> dict:
         if closed is not None:
             geom["gripper_closed"] = closed
         r = pickup.execute_move(sim, cfg, scenario={
-            "target_id": body, "source": square, "dest": "d5", "yaw_deg": yaw, "geometry": geom,
-            "stop_after": "lift", "quiet": True, "_grasp_attempt": 99,
+            "target_id": body, "source": square, "dest": dest, "yaw_deg": yaw, "geometry": geom,
+            "quiet": True, "_grasp_attempt": 99,
         })
         wq = world.object_pose(body)
         close, lift = seen.get("005_gripper_closed", {}), seen.get("006_lift", {})
@@ -86,7 +88,10 @@ def run_one(args: tuple[str, float, float | None, str, float | None]) -> dict:
             squeeze_lift=lift.get("squeezing"),
             pads=[close.get("fixed_jaw_box4"), close.get("moving_jaw_box2")],
             z_mm=round(float(wq[0][2]) * 1000, 1),
-            held=bool(lift and lift.get("squeezing") and (lift.get("tilt") or 99) < HELD_TILT_DEG and float(wq[0][2]) > 0.04),
+            carry_tilt=max([t for n, t in tilts if n in ("006_lift", "007_transport", "008_lower")], default=None),
+            tilts=tilts,
+            plumb=r.get("plumb"),
+            held=bool(r.get("world_success")),
         )
     except MemoryLimit:
         row.update(reason="MEM_LIMIT", held=False)
@@ -104,6 +109,7 @@ def main() -> None:
     ap.add_argument("--yaws", default=",".join(str(a) for a in range(0, 360, 30)))
     ap.add_argument("--heights", default="", help="mm, comma separated; empty = the PIECES table")
     ap.add_argument("--square", default="d4")
+    ap.add_argument("--dest", default="d6")
     ap.add_argument("--closed", type=float, default=None, help="gripper close target; default = the PIECES table")
     ap.add_argument("--jobs", type=int, default=5)
     ap.add_argument("--tag", default="latest")
@@ -111,7 +117,7 @@ def main() -> None:
     kinds = args.kinds.split(",")
     yaws = [float(a) for a in args.yaws.split(",")]
     heights = [float(h) / 1000 for h in args.heights.split(",")] if args.heights else [None]
-    work = [(k, y, h, args.square, args.closed) for k in kinds for h in heights for y in yaws]
+    work = [(k, y, h, args.square, args.closed, args.dest) for k in kinds for h in heights for y in yaws]
     os.environ["PYTHONHASHSEED"] = "0"
     OUT.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -128,7 +134,7 @@ def main() -> None:
         print(f"{kind:7s} h={str(h):5s} held {sum(r['held'] for r in rs):2d}/{len(rs)}  yaw 0..330: {marks}")
     fails = [r for r in rows if not r["held"]]
     for r in fails[:12]:
-        print(f"  {r['kind']} yaw={r['yaw']:.0f} h={r['height_mm']} {r.get('reason')} close_tilt={r.get('close_tilt')} lift_tilt={r.get('lift_tilt')} squeeze={r.get('squeeze_close')}/{r.get('squeeze_lift')}")
+        print(f"  {r['kind']} yaw={r['yaw']:.0f} h={r['height_mm']} {r.get('reason')} close_tilt={r.get('close_tilt')} carry_tilt={r.get('carry_tilt')} plumb={r.get('plumb')} squeeze={r.get('squeeze_close')}/{r.get('squeeze_lift')}")
 
 
 if __name__ == "__main__":

@@ -16,9 +16,9 @@ import argparse
 import json
 import multiprocessing as mp
 import os
-import resource
+import ctypes
 import signal
-import threading
+import struct
 import traceback
 import sys
 import time
@@ -37,24 +37,29 @@ OPENING = [
 GAMES = ("opera", "immortal", "evergreen")
 DISPLACED_MM = 8.0
 TILTED_DEG = 30.0
-# A healthy episode peaks near 1.6 GB; one runaway once took the machine to 67 GB.
-WORKER_MEM_CAP_GB = float(os.environ.get("ZIMA_MEM_CAP_GB", 4.0))
+# A healthy episode peaks near 1.6 GB; runaways have taken the machine past 60 GB.
+# The parent enforces both caps with SIGKILL: a worker stuck in a C call never
+# runs a Python signal handler, and RSS on macOS hides compressed pages.
+WORKER_MEM_CAP_GB = float(os.environ.get("ZIMA_MEM_CAP_GB", 6.0))
+TOTAL_MEM_CAP_GB = float(os.environ.get("ZIMA_TOTAL_MEM_CAP_GB", 40.0))
+_PHASES = None  # child end of the pipe to the parent, for the last phase reached before a kill
 
 
-class MemoryLimit(Exception):
-    pass
+def _footprint_gb(pid: int) -> float:
+    """Physical footprint (what Activity Monitor shows), 0 once the process is gone."""
+    try:
+        if sys.platform == "darwin":
+            buf = ctypes.create_string_buffer(256)
+            if _libproc.proc_pid_rusage(pid, 0, buf) != 0:
+                return 0.0
+            return struct.unpack_from("Q", buf, 72)[0] / 1e9  # rusage_info_v0.ri_phys_footprint
+        with open(f"/proc/{pid}/status") as f:
+            return next(int(l.split()[1]) for l in f if l.startswith("VmRSS")) / 1e6
+    except (OSError, StopIteration):
+        return 0.0
 
 
-def _peak_gb() -> float:
-    kb = 1 if sys.platform == "darwin" else 1024
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * kb / 1e9
-
-
-def _watch_memory(main_ident: int, done: threading.Event) -> None:
-    while not done.wait(0.25):
-        if _peak_gb() > WORKER_MEM_CAP_GB:
-            signal.pthread_kill(main_ident, signal.SIGUSR1)
-            return
+_libproc = ctypes.CDLL("/usr/lib/libproc.dylib") if sys.platform == "darwin" else None
 
 
 def game_cases(name: str) -> list[dict]:
@@ -162,13 +167,7 @@ def run_case(args: tuple[dict, str, float]) -> dict:
     def _alarm(*_):
         raise TimeoutError
 
-    def _mem(*_):
-        raise MemoryLimit
-
     signal.signal(signal.SIGALRM, _alarm)
-    signal.signal(signal.SIGUSR1, _mem)
-    done = threading.Event()
-    threading.Thread(target=_watch_memory, args=(threading.get_ident(), done), daemon=True).start()
     row = {"id": case["id"], "move": case["move"], "wall": wall, "plies_before": len(case["setup"])}
     t0 = time.time()
     phases: list[tuple[str, float]] = []
@@ -192,6 +191,8 @@ def run_case(args: tuple[dict, str, float]) -> dict:
 
         def _log(sim, name, extra=None):
             phases.append((name, time.time()))
+            if _PHASES is not None:
+                _PHASES.send(("phase", name))
             tid = getattr(sim, "target_id", None)
             try:
                 q, quat = world_of(sim).object_pose(tid)
@@ -280,15 +281,11 @@ def run_case(args: tuple[dict, str, float]) -> dict:
         )
     except TimeoutError:
         row.update(ok=False, claimed=False, reason="TIMEOUT", stage="timeout")
-    except MemoryLimit:
-        row.update(ok=False, claimed=False, reason="MEM_LIMIT", stage=phases[-1][0] if phases else "setup")
     except Exception as e:  # noqa: BLE001 — a crash is a result, not a harness failure
         row.update(ok=False, claimed=False, reason=f"EXC {type(e).__name__}", stage="crash", error=str(e)[:300],
                    trace=traceback.format_exc(limit=-6))
     finally:
         signal.alarm(0)
-        done.set()
-    row["peak_gb"] = round(_peak_gb(), 2)
     row["t"] = round(time.time() - t0, 1)
     row["phases"] = _phase_times(phases, t0)
     return row
@@ -338,6 +335,60 @@ def summarize(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _child(args, conn) -> None:
+    global _PHASES
+    _PHASES = conn
+    conn.send(("row", run_case(args)))
+
+
+def _run_all(ctx, work: list, jobs: int):
+    """One process per episode, at most `jobs` at once, killed by the parent on memory or time."""
+    queue = list(work)
+    live: dict = {}  # pid -> dict(proc, conn, args, t0, stage, peak)
+    while queue or live:
+        total = sum(_footprint_gb(pid) for pid in live)
+        while queue and len(live) < jobs and total + WORKER_MEM_CAP_GB <= TOTAL_MEM_CAP_GB:
+            a = queue.pop(0)
+            parent, child = ctx.Pipe(duplex=False)
+            proc = ctx.Process(target=_child, args=(a, child), daemon=True)
+            proc.start()
+            child.close()
+            live[proc.pid] = dict(proc=proc, conn=parent, args=a, t0=time.time(), stage="setup", peak=0.0)
+            total += 1.0
+        time.sleep(0.25)
+        use = {pid: _footprint_gb(pid) for pid in live}
+        over = sum(use.values()) > TOTAL_MEM_CAP_GB
+        biggest = max(use, key=use.get) if use else None
+        for pid, w in list(live.items()):
+            w["peak"] = max(w["peak"], use[pid])
+            row = None
+            try:
+                while w["conn"].poll():
+                    kind, val = w["conn"].recv()
+                    if kind == "phase":
+                        w["stage"] = val
+                    else:
+                        row = val
+            except (EOFError, OSError):
+                pass
+            case, wall, timeout = w["args"]
+            reason = ("MEM_LIMIT" if use[pid] > WORKER_MEM_CAP_GB or (over and pid == biggest)
+                      else "TIMEOUT" if time.time() - w["t0"] > timeout + 30 else None)
+            if row is None and reason:
+                w["proc"].kill()
+            elif row is None and w["proc"].is_alive():
+                continue
+            w["proc"].join(5)
+            w["conn"].close()
+            del live[pid]
+            if row is None:
+                row = {"id": case["id"], "move": case["move"], "wall": wall, "plies_before": len(case["setup"]),
+                       "ok": False, "claimed": False, "reason": reason or "CRASH", "stage": w["stage"],
+                       "t": round(time.time() - w["t0"], 1), "phases": {}}
+            row["peak_gb"] = round(w["peak"], 2)
+            yield row
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--suite", default="opening", help="opening | opera | immortal | evergreen | games | core (opening+opera) | all")
@@ -360,14 +411,13 @@ def main() -> int:
     t0 = time.time()
     os.environ["PYTHONHASHSEED"] = "0"  # set iteration order feeds association and planning; runs must repeat
     ctx = mp.get_context("spawn")
-    with ctx.Pool(args.jobs, maxtasksperchild=1) as pool:
-        for row in pool.imap_unordered(run_case, work):
-            rows.append(row)
-            with path.open("a") as f:
-                f.write(json.dumps(row, default=str) + "\n")
-            mark = "ok  " if row["ok"] else "FAIL"
-            print(f"  {mark} {row['wall']:10s} {row['id']:28s} {row['t']:5.1f}s  {row.get('reason') or ''}"
-                  f"{'  disturbed=' + str(len(row['disturbed'])) if row.get('disturbed') else ''}", flush=True)
+    for row in _run_all(ctx, work, args.jobs):
+        rows.append(row)
+        with path.open("a") as f:
+            f.write(json.dumps(row, default=str) + "\n")
+        mark = "ok  " if row["ok"] else "FAIL"
+        print(f"  {mark} {row['wall']:10s} {row['id']:28s} {row['t']:5.1f}s  {row.get('reason') or ''}"
+              f"{'  disturbed=' + str(len(row['disturbed'])) if row.get('disturbed') else ''}", flush=True)
     report = summarize(rows) + f"\n\nwall clock {time.time() - t0:.0f}s   rows: {path}"
     print(report)
     (OUT / f"{args.tag}.txt").write_text(report + "\n")
