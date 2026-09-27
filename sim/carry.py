@@ -74,6 +74,10 @@ def ee_for_piece(sim, piece_xyz, v_local, p_local) -> np.ndarray | None:
         ee = np.asarray(piece_xyz, dtype=float).copy()
         for _ in range(3):
             if not solve_plumb(sim, ee, v_local):
+                gpos, _ = sim.site_pose(EE_SITE)
+                sim.plumb_fail = {"why": "place_pose", "tilt": round(_tilt_deg(sim, v_local), 1),
+                                  "pos_mm": round(float(np.linalg.norm(np.asarray(gpos) - ee)) * 1000, 1),
+                                  "up_in_hand_deg": round(float(np.degrees(np.arccos(np.clip(np.asarray(v_local)[0], -1, 1)))), 1)}
                 return None
             _, R = sim.site_pose(EE_SITE)
             ee = np.asarray(piece_xyz, dtype=float) - np.asarray(R, dtype=float).reshape(3, 3) @ p_local

@@ -889,7 +889,7 @@ def _plumb_transport(
     up = [float(gpos[0]), float(gpos[1]), z_t]
     place = plumb.ee_for_piece(sim, [dest_xy[0], dest_xy[1], piece_place_z], v_local, p_local)
     if place is None:
-        result["plumb"] = "no_pose"
+        result["plumb"] = {"no_pose": getattr(sim, "plumb_fail", None)}
         return None
     above = [place[0], place[1], place[2] + end]
     hover = [place[0], place[1], max(z_t, above[2])]

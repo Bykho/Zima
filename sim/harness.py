@@ -196,7 +196,10 @@ def run_case(args: tuple[dict, str, float]) -> dict:
             tid = getattr(sim, "target_id", None)
             try:
                 q, quat = world_of(sim).object_pose(tid)
-                track.append([name, round(_tilt_deg(quat)), round(pickup.gripper_tilt_deg(sim)), [round(float(v) * 1000) for v in q]])
+                belief_err = None
+                if sim is not world_of(sim) and tid in getattr(sim, "known", ()):
+                    belief_err = [round(float(b - w) * 1000, 1) for b, w in zip(sim.object_pose(tid)[0], q)]
+                track.append([name, round(_tilt_deg(quat)), round(pickup.gripper_tilt_deg(sim)), [round(float(v) * 1000) for v in q], belief_err])
             except Exception:  # noqa: BLE001 — target not a body (e.g. before setup)
                 pass
             if name in ("005_gripper_closed", "006_lift") and tid:
