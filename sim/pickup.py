@@ -1316,6 +1316,8 @@ def close_gripper(sim: Sim, closed: float, steps: int = 200):
         sim.step()
     sim.hold({**sim.qpos(), "gripper": closed})
     sim.step(30)
+    if closed >= start:
+        return
     # A jaw closing on a piece creeps for a while before it stalls; reading
     # the grasp before then is a coin flip on the speed threshold.
     still = 0
