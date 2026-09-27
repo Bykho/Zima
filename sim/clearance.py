@@ -65,97 +65,6 @@ def occupied_neighbor_bodies(sim, cfg: dict, source: str, scenario: dict | None 
     return found
 
 
-def _gaps_to(sim, bodies: list[str]) -> list[float]:
-    import mujoco
-
-    def _body_geoms(name: str) -> list[int]:
-        bid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, name)
-        if bid < 0:
-            return []
-        return [i for i in range(sim.model.ngeom) if int(sim.model.geom_bodyid[i]) == bid]
-
-    jaw_geoms: list[int] = []
-    for name in JAW_BODIES + CAMERA_BODIES:
-        jaw_geoms.extend(_body_geoms(name))
-    fromto = np.zeros(6)
-    gaps = []
-    for name in bodies:
-        other = _body_geoms(name)
-        best = 1.0
-        for i in jaw_geoms:
-            for j in other:
-                d = mujoco.mj_geomDistance(sim.model, sim.data, i, j, 0.12, fromto)
-                if d < best:
-                    best = d
-        gaps.append(float(best))
-    return gaps
-
-
-def finger_sweep_bodies(sim, cfg: dict, source: str, occ: dict[str, str]) -> list[str]:
-    """Occupied neighbors that lie along the open-jaw axis (not the palm)."""
-    if not occ:
-        return []
-    size = float(cfg.get("sim", {}).get("board", {}).get("square_size", 0.0375))
-    src = np.asarray(square_to_world(source, cfg)[:2], dtype=float)
-    fix = sim.geom_xpos("fixed_jaw_sph_tip1")[:2]
-    mov = sim.geom_xpos("moving_jaw_sph_tip1")[:2]
-    od = mov - fix
-    n = float(np.linalg.norm(od)) + 1e-12
-    od = od / n
-    out = []
-    for sq, body in occ.items():
-        v = np.asarray(square_to_world(sq, cfg)[:2], dtype=float) - src
-        if float(np.dot(v, od)) > 0.35 * size:
-            out.append(body)
-    return out
-
-
-def choose_approach_gripper(
-    sim, grasp_xyz, sweep_bodies: list[str], open_g: float, min_g: float = 0.0
-) -> float | None:
-    """Widest approach opening whose fingers clear sweep_bodies at the grasp pose."""
-    if not sweep_bodies:
-        return None
-    start = sim.qpos()
-    lo = float(min_g)
-    hi = float(open_g)
-    samples = np.unique(np.concatenate(([hi], np.linspace(lo, hi, _GRIPPER_SAMPLES))))
-    samples.sort()
-    best = None
-    best_gap = -1e9
-    widest_clear = None
-    for g in samples:
-        sim.set_qpos(start, hold=True)
-        q = sim.qpos()
-        q["gripper"] = float(g)
-        sim.set_qpos(q, hold=True)
-        if not solve_ik(sim, grasp_xyz):
-            continue
-        gap = min(_gaps_to(sim, sweep_bodies)) if sweep_bodies else 1.0
-        if gap > best_gap:
-            best_gap = gap
-            best = float(g)
-        if gap >= _MARGIN:
-            widest_clear = float(g)
-    sim.set_qpos(start, hold=True)
-    if widest_clear is not None:
-        if abs(widest_clear - hi) < 0.02:
-            return None
-        return widest_clear
-    if best is None or abs(best - hi) < 0.02:
-        return None
-    return best
-
-
-def apply_approach_gripper(sim, hover_xyz, gripper: float) -> bool:
-    """Set approach aperture at hover, keeping EE on the hover point."""
-    q = sim.qpos()
-    q["gripper"] = float(gripper)
-    sim.set_qpos(q, hold=True)
-    sim.set_ctrl({**sim.qpos(), "gripper": float(gripper)})
-    return bool(solve_ik(sim, hover_xyz))
-
-
 # Clutter-aware approach: small candidate set around the existing grasp.
 # Grasp XY is frozen. No camera, no RRT. Wrist-roll + aperture only.
 APPROACH_BODIES = ("gripper", "moving_jaw_so101_v1", "camera_mount", "wrist", "lower_arm")
@@ -419,11 +328,6 @@ def _aabb_gap_matrix(sim, a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.linalg.norm(sep, axis=2)
 
 
-def _aabb_gap(sim, i: int, j: int) -> float:
-    """Gap between the world AABBs of two geoms: a valid lower bound on their distance."""
-    return float(_aabb_gap_matrix(sim, np.array([i]), np.array([j]))[0, 0])
-
-
 def _geom_hull_points(sim, gid: int) -> np.ndarray | None:
     """World-frame vertex cloud whose convex hull is the geom (box, mesh). Cached locally."""
     import mujoco
@@ -515,28 +419,6 @@ def _exact_or_raw(sim, i: int, j: int, d: float) -> float:
     if A is None or B is None:
         return d
     return float(gjk_distance(A, B))
-
-
-def _pair_gap(sim, i: int, j: int, fromto) -> float:
-    """Signed geom distance, guarded against collider glitches.
-
-    mj_geomDistance returns exactly 0 for some separated box-box and
-    mesh-box pairs (knight/king collision boxes vs gripper). The true
-    distance can never be below the gap between the two world AABBs, so a
-    value under that bound is bogus and is replaced by the bound
-    (conservative, still valid). One bogus 0 would otherwise turn a clear
-    approach into a "collision" and burn the candidate.
-    """
-    import mujoco
-
-    d = float(mujoco.mj_geomDistance(sim.model, sim.data, i, j, 0.20, fromto))
-    if d >= 0.20 - 1e-9:
-        return d
-    d = _exact_or_raw(sim, i, j, d)
-    lb = _aabb_gap(sim, i, j)
-    if lb > 1e-4 and d < lb - 1e-4:
-        return lb
-    return d
 
 
 def _geoms_of(sim, bodies) -> tuple[np.ndarray, list[str]]:

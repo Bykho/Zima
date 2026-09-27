@@ -56,10 +56,6 @@ def grasp_xy_delta(grot, off) -> np.ndarray:
     return gx * ox + gy * oy
 
 
-def _dof_ids(sim: Sim) -> list[int]:
-    return [int(sim.model.jnt_dofadr[sim._joint[n]]) for n in ARM_JOINTS]
-
-
 def _solve_position(
     sim: Sim,
     target: np.ndarray,
@@ -383,12 +379,6 @@ def reachable_approaches(
         return hits
     finally:
         sim.set_qpos(snap, hold=True)
-
-
-def first_reachable_approach(sim: Sim, candidates, goal=None, **kwargs) -> list[float] | None:
-    """First candidate from `reachable_approaches`, or None."""
-    hits = reachable_approaches(sim, candidates, goal, **kwargs)
-    return hits[0] if hits else None
 
 
 def ik_fail_snapshot(sim: Sim, requested) -> dict:
