@@ -270,7 +270,7 @@ def run_case(args: tuple[dict, str, float]) -> dict:
             victim_gone=bool(victim_gone),
             disturbed=disturbed,
             claimed=bool(r.get("success")),
-            reason=r.get("failure_reason"),
+            reason=r.get("failure_reason") if not r.get("success") else (None if mover_ok and victim_gone and not disturbed else ("COLLATERAL_KNOCK" if disturbed else "BELIEF_WRONG")),
             fallen_after=r.get("fallen_after"),
             grasp_check=r.get("grasp_check"),
             stage=r.get("failure_stage"),

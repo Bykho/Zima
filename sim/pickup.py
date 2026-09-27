@@ -2280,7 +2280,6 @@ def _after_place_fail(
         return None
     if failed.get("failure_reason") == "RELEASE_FAILURE":
         return None
-    dest = sc.get("dest")
     if _perceiving(sim) and tid not in sim.known:
         from perceive import perceive_board
 
@@ -2289,18 +2288,6 @@ def _after_place_fail(
             failed["failure_reason"] = "PIECE_LOST"
             failed["failure_stage"] = "place"
             return None
-    qpos, quat = sim.object_pose(tid)
-    dest_xy = square_to_world(dest, cfg, z=surface) if dest else None
-    near_dest = bool(dest_xy) and float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) < 0.028
-    on_dest = (bool(dest) and square_of_body(sim, cfg, tid) == dest) or near_dest
-    if on_dest:
-        # The chess move is done. Retreat/pad contact must not fail it
-        # (Opera Bg4 sat on g4 and still returned RETREAT_COLLISION).
-        failed["success"] = True
-        failed["failure_reason"] = None
-        failed.setdefault("place_diag", {})["accepted_on_dest"] = True
-        failed.setdefault("place_diag", {})["accepted_tilt_deg"] = round(queen_tilt_deg(quat), 1)
-        return None
     return _recover_fallen_then_finish(
         sim, cfg, use_vision, sc, failed, tid, surface, release_open
     )
@@ -2610,6 +2597,21 @@ def _belief_set_down(sim, tid: str, surface: float) -> None:
     x = R.reshape(3, 3)[:, 0]
     yaw = float(np.arctan2(x[1], x[0]))
     sim.believe(tid, [float(p[0]), float(p[1]), surface], (np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)))
+
+
+def _placed(sim, cfg: dict, tid: str, dest: str, dest_xy, surface: float, off_board: bool) -> bool:
+    """Is the released piece where it should be? The wrist camera judges when perceiving."""
+    if off_board:
+        return bool(bowl_contains(sim.object_pose(tid)[0], dest_xy))
+    if _perceiving(sim):
+        look = verify_piece(sim, cfg, tid, dest)
+        return bool(look.get("seen") and look.get("upright") and square_of_body(sim, cfg, tid) == dest)
+    _, quat = sim.object_pose(tid)
+    return bool(
+        square_of_body(sim, cfg, tid) == dest
+        and queen_upright(quat, tilt_max=0.5)
+        and object_on_board(sim, surface, object_id=tid)
+    )
 
 
 def verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
@@ -2970,7 +2972,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             collateral_start[name] = (np.asarray(p, dtype=float).copy(), np.asarray(q, dtype=float).copy())
 
     def _collateral_check():
-        """Any bystander piece knocked over or shoved off its square fails the move."""
+        """Evaluator: bystanders knocked over or shoved off their squares. Reported, never fed back."""
         hits = []
         for name, (p0, _q0) in collateral_start.items():
             try:
@@ -3002,9 +3004,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                     }
                 )
         result["collateral"] = hits
-        if hits and result.get("success"):
-            result["success"] = False
-            result["failure_reason"] = "COLLATERAL_KNOCK"
+        if hits:
             fc = hits[0].get("first_contact") or first_hit[0] or {}
             result["neighbor_collision_phase"] = fc.get("phase")
 
@@ -3021,11 +3021,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                 world_ok = bowl_contains(wp, dest_xy)
             else:
                 world_ok = square_of_body(W, cfg, tid) == dest and queen_upright(wq, tilt_max=0.5)
-            result["belief_success"] = bool(result.get("success"))
             result["world_success"] = bool(world_ok)
-            result["success"] = bool(result.get("success") and world_ok)
-            if result["belief_success"] and not world_ok:
-                result["failure_reason"] = "BELIEF_WRONG"
         annotate_episode(result)
         return result
 
@@ -3771,15 +3767,10 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     if off_board:
         seated = bowl_contains(q_rel, dest_xy)
         upright = True
-        on_sq = seated
-        result["placement_success"] = bool(seated and not still_held)
     else:
-        on_sq = square_of_body(sim, cfg, tid) == dest
         seated = object_on_board(sim, surface, object_id=tid)
-        tilt = float(queen_tilt_deg(qquat_rel))
-        result["place_diag"]["tilt_deg"] = round(tilt, 1)
+        result["place_diag"]["tilt_deg"] = round(float(queen_tilt_deg(qquat_rel)), 1)
         upright = queen_upright(qquat_rel, tilt_max=0.5)
-        result["placement_success"] = bool(on_sq and upright and seated and not still_held)
     result["place_diag"]["still_held"] = still_held
     result["place_diag"]["jaw_contact"] = bool(grasp_acquired(sim, tid))
     result["place_diag"]["seated"] = bool(seated)
@@ -3824,96 +3815,22 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         retreated = _safe_lin(
             sim, high, cfg, wrist, obstacles=obstacle_bodies(sim, skip={tid}), skip={tid}
         )
+    settle_queen(sim, steps=48)
+    still_held = bool(grasp_acquired(sim, tid) and float(sim.object_pose(tid)[0][2]) > surface + 0.012)
+    result["placement_success"] = _placed(sim, cfg, tid, dest, dest_xy, surface, off_board) and not still_held
+    result["retreat_success"] = bool(retreated)
     if not retreated:
         result["ik_fail_phase"] = "010_final"
-        result["retreat_success"] = False
-        if not result["placement_success"]:
-            result["failure_reason"] = "RELEASE_FAILURE" if still_held else "PLACEMENT_POSITION_ERROR"
-        else:
-            result["failure_reason"] = "IK_FAILURE"
         log_state(sim, "fail_retreat", extra={"target": _xyz(high)})
-        again = _after_place_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-    settle_queen(sim, steps=48)
-    if _perceiving(sim) and not off_board:
-        look = verify_piece(sim, cfg, tid, dest)
-        result["place_diag"]["verify_look"] = look
-        result["placement_success"] = bool(
-            look.get("seen") and look.get("upright") and square_of_body(sim, cfg, tid) == dest
-        )
-    # L-shaped men wobble after release then stand. Scooping a piece that
-    # is already on dest just to cup it (Nf6) is worse than waiting.
-    if not off_board and not result.get("placement_success") and not _perceiving(sim):
-        q_w, q_wq = sim.object_pose(tid)
-        if square_of_body(sim, cfg, tid) == dest and not queen_upright(q_wq, tilt_max=0.5):
-            settle_queen(sim, steps=120)
-            q_w, q_wq = sim.object_pose(tid)
-            if (
-                square_of_body(sim, cfg, tid) == dest
-                and queen_upright(q_wq, tilt_max=0.5)
-                and object_on_board(sim, surface, object_id=tid)
-                and not grasp_acquired(sim, tid)
-            ):
-                result["placement_success"] = True
-                result["place_diag"]["wobble_settled"] = True
     log_state(sim, "010_final")
 
     qpos, qquat = W.object_pose(tid)
     result["final_position_error_mm"] = float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) * 1000
     result["final_queen_xyz"] = qpos.tolist()
-    result["place_diag"]["final_xy_mm"] = [
-        round(float(qpos[0]) * 1000, 1),
-        round(float(qpos[1]) * 1000, 1),
-    ]
     result["place_diag"]["final_err_mm"] = round(result["final_position_error_mm"], 1)
-    opened = result["place_diag"].get("piece_err_after_open_mm")
-    released = result["place_diag"].get("release_err_mm")
-    if opened is not None and released is not None:
-        result["place_diag"]["slide_after_release_mm"] = round(float(released) - float(opened), 1)
-    result["place_diag"]["jaw_contact_after_retreat"] = bool(grasp_acquired(sim, tid))
-    result["place_diag"]["final_z_mm"] = round(float(qpos[2]) * 1000, 1)
     result["place_diag"]["final_upright"] = bool(queen_upright(qquat, tilt_max=0.5))
-    if _perceiving(sim):
-        if tid in sim.known:
-            qpos, qquat = sim.object_pose(tid)
-        else:
-            qpos, qquat = np.array([0.0, 0.0, -1.0]), np.array([1.0, 0.0, 0.0, 0.0])
-    on_dest = square_of_body(sim, cfg, tid) == dest
-    if off_board:
-        result["retreat_success"] = bool(
-            bowl_contains(qpos, dest_xy) and not grasp_acquired(sim, tid)
-        )
-    else:
-        result["retreat_success"] = bool(
-            on_dest
-            and queen_upright(qquat, tilt_max=0.5)
-            and (
-                abs(float(qpos[2]) - surface) < 0.035
-                or bool(result.get("placement_success"))
-            )
-        )
     if not result["placement_success"]:
         result["failure_reason"] = "RELEASE_FAILURE" if still_held else "PLACEMENT_POSITION_ERROR"
-        again = _after_place_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-    # Piece is on dest. A failed hop must not re-approach that square
-    # (Opera Bg4: seated, then retry died APPROACH_COLLISION).
-    # Bowl dumps reuse dest=source, so "on dest" means the capture failed.
-    if (
-        not off_board
-        and on_dest
-        and queen_upright(qquat, tilt_max=0.5)
-        and not (grasp_acquired(sim, tid) and float(qpos[2]) > surface + 0.012)
-    ):
-        result["success"] = True
-        result["failure_reason"] = None
-        return _done()
-    if not result["retreat_success"]:
-        result["failure_reason"] = "RETREAT_COLLISION"
         again = _after_place_fail(
             sim, cfg, use_vision, sc, result, tid, surface, release_open
         )
@@ -3965,7 +3882,7 @@ def main():
     print("\n" + json.dumps(result, indent=2))
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
     (DEBUG_DIR / "pickup" / "result.json").write_text(json.dumps(result, indent=2))
-    sys.exit(0 if result["success"] else 1)
+    sys.exit(0 if result["success"] and result.get("world_success", True) else 1)
 
 
 if __name__ == "__main__":
