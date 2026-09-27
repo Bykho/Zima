@@ -144,7 +144,7 @@ def run_case(args: tuple[dict, str, float]) -> dict:
             tid = getattr(sim, "target_id", None)
             try:
                 q, quat = world_of(sim).object_pose(tid)
-                track.append([name, round(_tilt_deg(quat)), [round(float(v) * 1000) for v in q]])
+                track.append([name, round(_tilt_deg(quat)), round(pickup.gripper_tilt_deg(sim)), [round(float(v) * 1000) for v in q]])
             except Exception:  # noqa: BLE001 — target not a body (e.g. before setup)
                 pass
             return orig_log(sim, name, extra)
@@ -164,9 +164,10 @@ def run_case(args: tuple[dict, str, float]) -> dict:
         orig_verify = pickup.verify_piece
 
         def _verify(sim, cfg, tid, square):
+            before = round(_tilt_deg(world_of(sim).object_pose(tid)[1]), 1)
             out = orig_verify(sim, cfg, tid, square)
             q, quat = world_of(sim).object_pose(tid)
-            looks.append({"look": {k: v for k, v in out.items() if k != "xy"}, "world_tilt": round(_tilt_deg(quat), 1),
+            looks.append({"look": {k: v for k, v in out.items() if k != "xy"}, "tilt_before": before, "world_tilt": round(_tilt_deg(quat), 1),
                           "world_off_mm": round(float(np.hypot(*(np.asarray(q[:2]) - np.asarray(square_to_world(square, cfg)[:2])))) * 1000, 1)})
             return out
 
@@ -219,6 +220,8 @@ def run_case(args: tuple[dict, str, float]) -> dict:
             reason=r.get("failure_reason"),
             stage=r.get("failure_stage"),
             capture=victim is not None,
+            plumb=r.get("plumb"),
+            retreat_straight=(r.get("place_diag") or {}).get("retreat_straight"),
         )
     except TimeoutError:
         row.update(ok=False, claimed=False, reason="TIMEOUT", stage="timeout")
@@ -296,6 +299,7 @@ def main() -> int:
     path.write_text("")
     rows = []
     t0 = time.time()
+    os.environ["PYTHONHASHSEED"] = "0"  # set iteration order feeds association and planning; runs must repeat
     ctx = mp.get_context("spawn")
     with ctx.Pool(args.jobs, maxtasksperchild=1) as pool:
         for row in pool.imap_unordered(run_case, work):

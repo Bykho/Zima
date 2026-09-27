@@ -210,12 +210,15 @@ def solve_ik_down(
     step: float = 0.6,
     ori_weight: float = 0.05,
     x_axis=None,
+    local_axis=None,
 ) -> bool:
     """Reach target_pos with gripper +X pointing world-down (a vertical pinch).
 
     x_axis: optional world direction for gripper +X instead of straight down.
     Used to lift with the *current* orientation frozen when a vertical pinch
     was not reachable, so the jaws translate instead of swinging.
+    local_axis: gripper-frame vector to align with x_axis instead of +X
+    (a held piece's own up axis, to carry it plumb).
 
     Joint 5-row task: position (3) + the x/y world components of gripper +X
     (2), which are zero when the approach axis is vertical. With pan, lift,
@@ -243,13 +246,16 @@ def solve_ik_down(
     if x_axis is not None:
         axis = np.asarray(x_axis, dtype=np.float64)
         axis = axis / (np.linalg.norm(axis) + 1e-12)
+    if local_axis is not None:
+        local = np.asarray(local_axis, dtype=np.float64)
+        local = local / (np.linalg.norm(local) + 1e-12)
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
     best = float("inf")
     since_best = 0
     for _ in range(max_iters):
         R = data.site_xmat[sid].reshape(3, 3)
-        x = R[:, 0]
+        x = R[:, 0] if local_axis is None else R @ local
         e_pos = target - data.site_xpos[sid]
         if axis is None:
             e_ori = -x[:2]  # want x_world = (0, 0, -1)
