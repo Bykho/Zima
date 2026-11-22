@@ -505,6 +505,26 @@ def _pitch_in_place(sim: Sim, flex_goal: float, n: int = 8) -> None:
     _drive_arm(sim, path, float(sim.qpos()["gripper"]), duration=0.5)
 
 
+def _roll_in_place(sim: Sim, roll_goal: float, rad_per_s: float = 2.0) -> None:
+    """Turn wrist_roll to `roll_goal` under physics, the other arm joints held at their current targets.
+
+    A 180 deg flip in 0.35 s saturated the shoulder/elbow servos and the arm
+    sagged onto the rank below (jaw swept c2/d2/e2 at ee_z=25 mm), so the turn
+    runs at a bounded wrist speed in short legs and settles before returning.
+    """
+    q0 = {j: float(sim.qpos()[j]) for j in ARM_JOINTS}
+    d = roll_goal - q0["wrist_roll"]
+    if abs(d) < 1e-3:
+        return
+    legs = max(1, int(np.ceil(abs(d) / 0.4)))
+    path = [{**q0, "wrist_roll": q0["wrist_roll"] + d * i / legs} for i in range(1, legs + 1)]
+    _drive_arm(sim, path, float(sim.qpos()["gripper"]), duration=max(0.3, abs(d) / rad_per_s))
+    for _ in range(4):
+        if abs(float(sim.qpos()["wrist_roll"]) - roll_goal) <= 0.05:
+            break
+        sim.step(20)
+
+
 def _pitch_holding(sim: Sim, flex_goal: float, closed: float, tid: str | None = None, n: int = 10) -> None:
     """Same as _pitch_in_place, but keep the gripper shut so a held piece follows."""
     if abs(flex_goal - float(sim.qpos()["wrist_flex"])) < 1e-3:
@@ -3247,25 +3267,12 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     def _apply_approach(plan: dict) -> bool:
         """Set the planned roll + aperture, then bring the EE to its pregrasp."""
         if plan["roll"] is not None:
-            qpre = sim.qpos()
-            d_roll = abs(float(plan["roll"]) - float(qpre["wrist_roll"]))
-            qpre["wrist_roll"] = float(plan["roll"])
-            # Kinematic, like the pregrasp move that follows. A 180° flip under
-            # physics in 0.35 s saturates the shoulder/elbow actuators and the
-            # arm sags onto the rank below (traced: jaw swept c2/d2/e2 at
-            # ee_z=25 mm), and the roll itself never reached its target, so
-            # the executed pinch differed from the planned one.
-            move_qpos(sim, qpre, duration=max(0.3, 0.25 * d_roll), physics=False)
-            if abs(float(sim.qpos()["wrist_roll"]) - float(plan["roll"])) > 0.05:
-                sim.set_qpos(qpre, hold=True)
-                sim.step()
+            _roll_in_place(sim, float(plan["roll"]))
+            result["approach_roll_err"] = round(abs(float(sim.qpos()["wrist_roll"]) - float(plan["roll"])), 3)
         g_ap = float(plan["gripper"])
         result["approach_gripper"] = None if abs(g_ap - open_g) < 0.02 else g_ap
         if abs(g_ap - float(sim.qpos()["gripper"])) > 0.01:
-            qg = sim.qpos()
-            qg["gripper"] = g_ap
-            sim.set_qpos(qg, hold=True)
-            sim.set_ctrl({**sim.qpos(), "gripper": g_ap})
+            open_gripper(sim, g_ap, steps=40)
         # Kinematic pregrasp is a straight line. From the last square (g4)
         # that sweeps the file and knocks whoever is in the way (fallen Nf3,
         # then the e5 pawn → APPROACH_COLLISION). Physically hover over the
