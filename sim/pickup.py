@@ -456,45 +456,61 @@ def _vertical_wrist(sim: Sim, target) -> dict | None:
         sim.set_qpos(snap, hold=True)
 
 
+def _pitch_path(sim: Sim, flex_goal: float, n: int) -> list[dict]:
+    """Arm waypoints that pitch wrist_flex to `flex_goal` with the EE held put (planned, not executed)."""
+    keep, _ = sim.site_pose(EE_SITE)
+    snap = sim.qpos()
+    f0 = float(snap["wrist_flex"])
+    path: list[dict] = []
+    try:
+        for i in range(1, n + 1):
+            q = sim.qpos()
+            q["wrist_flex"] = f0 + (flex_goal - f0) * i / n
+            sim.set_qpos(q, hold=False)
+            solve_ik(sim, keep, lock_joints=("wrist_flex", "wrist_roll"))
+            path.append({j: float(sim.qpos()[j]) for j in ARM_JOINTS})
+    finally:
+        sim.set_qpos(snap, hold=True)
+    return path
+
+
+def _drive_arm(sim: Sim, path: list[dict], gripper: float, duration: float, until=None) -> bool:
+    """Servo the arm through joint waypoints under physics, gripper target fixed. False if `until()` fails."""
+    steps = max(8, int(round(duration / max(sim.dt, 1e-6) / max(1, len(path)))))
+    for q in path:
+        start = {j: float(sim.qpos()[j]) for j in ARM_JOINTS}
+        for k in range(1, steps + 1):
+            u = k / steps
+            u = u * u * (3 - 2 * u)
+            sim.set_ctrl({**{j: start[j] + (q[j] - start[j]) * u for j in ARM_JOINTS}, "gripper": float(gripper)})
+            sim.step()
+        if until is not None and not until():
+            return False
+    sim.set_ctrl({**path[-1], "gripper": float(gripper)} if path else {"gripper": float(gripper)})
+    sim.step(10)
+    return True
+
+
 def _pitch_in_place(sim: Sim, flex_goal: float, n: int = 8) -> None:
     """Rotate wrist_flex to `flex_goal` while shoulder/elbow hold the EE put.
 
     A wrist-only move at a stretched observe pose swings the gripper on a
     ~15 cm lever: traced dropping the EE from z=0.14 to z=0.024 and sweeping
-    the jaw through the rank below. Pitch in small steps and re-solve position
-    IK with the wrist locked at each step so the EE stays where it is.
+    the jaw through the rank below. Plan small pitch steps with position IK
+    re-solved at each (wrist locked), then servo through them under physics.
     """
-    keep, _ = sim.site_pose(EE_SITE)
-    f0 = float(sim.qpos()["wrist_flex"])
-    if abs(flex_goal - f0) < 1e-3:
+    if abs(flex_goal - float(sim.qpos()["wrist_flex"])) < 1e-3:
         return
-    for i in range(1, n + 1):
-        q = sim.qpos()
-        q["wrist_flex"] = f0 + (flex_goal - f0) * i / n
-        sim.set_qpos(q, hold=True)
-        solve_ik(sim, keep, lock_joints=("wrist_flex", "wrist_roll"))
-        sim.set_qpos(sim.qpos(), hold=True)
-        sim.step()
+    path = _pitch_path(sim, flex_goal, n)
+    _drive_arm(sim, path, float(sim.qpos()["gripper"]), duration=0.5)
 
 
 def _pitch_holding(sim: Sim, flex_goal: float, closed: float, tid: str | None = None, n: int = 10) -> None:
     """Same as _pitch_in_place, but keep the gripper shut so a held piece follows."""
-    keep, _ = sim.site_pose(EE_SITE)
-    f0 = float(sim.qpos()["wrist_flex"])
-    if abs(flex_goal - f0) < 1e-3:
+    if abs(flex_goal - float(sim.qpos()["wrist_flex"])) < 1e-3:
         return
-    for i in range(1, n + 1):
-        q = {name: sim.qpos()[name] for name in ARM_JOINTS}
-        q["wrist_flex"] = f0 + (flex_goal - f0) * i / n
-        q["gripper"] = float(closed)
-        sim.set_qpos(q, hold=True)
-        solve_ik(sim, keep, lock_joints=("wrist_flex", "wrist_roll"))
-        cmd = {**{j: sim.qpos()[j] for j in ARM_JOINTS}, "gripper": float(closed)}
-        sim.set_ctrl(cmd)
-        for _ in range(10):
-            sim.step()
-        if not grasp_acquired(sim, tid):
-            break
+    path = _pitch_path(sim, flex_goal, n)
+    _drive_arm(sim, path, closed, duration=0.6, until=lambda: grasp_acquired(sim, tid))
 
 
 _LEVEL_PINCH_MIN_DEG = 2.5
