@@ -3273,10 +3273,10 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         result["approach_gripper"] = None if abs(g_ap - open_g) < 0.02 else g_ap
         if abs(g_ap - float(sim.qpos()["gripper"])) > 0.01:
             open_gripper(sim, g_ap, steps=40)
-        # Kinematic pregrasp is a straight line. From the last square (g4)
-        # that sweeps the file and knocks whoever is in the way (fallen Nf3,
-        # then the e5 pawn → APPROACH_COLLISION). Physically hover over the
-        # target first so the kinematic bit is a short local drop.
+        # A straight line to the pregrasp from the last square (g4) sweeps the
+        # file and knocks whoever is in the way (fallen Nf3, then the e5 pawn
+        # → APPROACH_COLLISION). Hover over the target first so the pregrasp
+        # move is a short local drop.
         gpos, _ = sim.site_pose(EE_SITE)
         pre_xyz = np.asarray(plan["pre"], dtype=float)
         if float(np.hypot(pre_xyz[0] - gpos[0], pre_xyz[1] - gpos[1])) > 0.05:
@@ -3291,8 +3291,8 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                 skip={tid},
             )
         if pickup_clear:
-            return move_lin(sim, plan["pre"], duration=1.0, physics=False, n_wp=6, lock_joints=grasp_lock, down=True)
-        return move_ik(sim, plan["pre"], duration=1.0, lock_joints=grasp_lock, down=True)
+            return move_lin(sim, plan["pre"], duration=1.0, physics=True, n_wp=6, lock_joints=grasp_lock, down=True)
+        return move_ik(sim, plan["pre"], duration=1.0, physics=True, lock_joints=grasp_lock, down=True)
 
     if not _apply_approach(approach):
         result["failure_reason"] = "IK_NO_SOLUTION"
