@@ -1161,6 +1161,38 @@ def _follow_q_path(sim: Sim, path_q: list[dict], duration: float, guard=None) ->
     return True
 
 
+_COLUMN_TILT_DEG = 2.0
+
+
+def _descend_column(sim: Sim, grasp, lock: tuple[str, ...]) -> list[dict] | None:
+    """Turn the claw to its grasp angle at this height, then plan straight down.
+
+    The claw only changes angle up here: rotating on the way down sweeps
+    the jaws sideways through the piece. Returns the vertical joint chain
+    (the arm is already over the grasp at the grasp angle), or None with
+    nothing moved.
+    """
+    snap = sim.qpos()
+    try:
+        if not solve_ik_down(sim, grasp, lock_joints=lock):
+            return None
+        _, R = sim.site_pose(EE_SITE)
+        v_local = np.asarray(R, dtype=float).reshape(3, 3).T @ plumb.UP
+        sim.set_qpos(snap, hold=True)
+        gpos, _ = sim.site_pose(EE_SITE)
+        above = [float(grasp[0]), float(grasp[1]), float(gpos[2])]
+        if not plumb.solve_plumb(sim, above, v_local, _COLUMN_TILT_DEG):
+            return None
+        q_above = {n: float(sim.qpos()[n]) for n in ARM_JOINTS}
+        down = plumb.plan(sim, [(grasp, _COLUMN_TILT_DEG)], v_local, [])
+    finally:
+        sim.set_qpos(snap, hold=True)
+    if down is None:
+        return None
+    _follow_q_path(sim, [q_above], 0.6)
+    return down
+
+
 def _physical_descend_path(sim: Sim, target, path_q: list[dict], duration: float) -> dict:
     """Replay the planner's verified joint path (pre -> grasp) with the bystander guard."""
     tid = _tid(sim)
@@ -3319,8 +3351,10 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     result["ee_requested"] = _xyz(grasp)
     blocked = carry_blocked(obstacles, grasp[:2], dest_xy[:2])
     result["transport_path"] = "clearance" if blocked else "straight"
+    column = _descend_column(sim, grasp, grasp_lock)
+    result["descend_column"] = column is not None or getattr(sim, "plumb_fail", None)
     desc = physical_descend(
-        sim, grasp, duration=1.2, lock_joints=grasp_lock, path_q=descend_path
+        sim, grasp, duration=1.2, lock_joints=grasp_lock, path_q=column or descend_path
     )
     # Guard tripped: a robot link touched a bystander on the way down.
     if desc.get("aborted"):
