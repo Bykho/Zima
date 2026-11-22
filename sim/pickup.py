@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "sim"))
 import mujoco
 
 import carry as plumb
+import evaluate_move
 
 from ik import (
     CARRY_ORI_WEIGHT,
@@ -661,10 +662,6 @@ def _seeded_grasp_xy(sim: Sim, cfg: dict, piece_xy, geom: dict | None, z: float)
 
 
 _WORKSPACE_R_M = 0.19
-# A bystander piece shoved this far or tipped this much means the move failed
-# even if the target landed: on a real board that is a knocked-over piece.
-_COLLATERAL_DISP_MM = 8.0
-_COLLATERAL_TILT_DEG = 15.0
 
 
 def _arm_base_xy(cfg: dict) -> np.ndarray:
@@ -3003,7 +3000,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             collateral_start[name] = (np.asarray(p, dtype=float).copy(), np.asarray(q, dtype=float).copy())
 
     def _collateral_check():
-        """Evaluator: bystanders knocked over or shoved off their squares. Reported, never fed back."""
+        """Evaluator: bystanders knocked over or shoved off their squares (fails `world_success`). Never fed back."""
         hits = []
         for name, (p0, _q0) in collateral_start.items():
             try:
@@ -3016,15 +3013,8 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             # capture lands on them. That is trash, not a board failure.
             if in_trash(p0, cfg) or in_well(p0, cfg):
                 continue
-            disp = float(np.linalg.norm(np.asarray(p[:2]) - p0[:2]) * 1000.0)
-            tilt0 = float(queen_tilt_deg(_q0))
-            tilt = float(queen_tilt_deg(q))
-            # Already-down men (Nf3 after Bg4) rattle when the next capture
-            # approaches. Count a new shove, not the original tip.
-            already_down = tilt0 > 35.0
-            disp_lim = 18.0 if already_down else _COLLATERAL_DISP_MM
-            tipped = (not already_down) and tilt > _COLLATERAL_TILT_DEG and tilt > tilt0 + 12.0
-            if disp > disp_lim or tipped:
+            disp, tilt, hit = evaluate_move.disturbance(p0, _q0, p, q)
+            if hit:
                 hits.append(
                     {
                         "body": name,
@@ -3046,13 +3036,12 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         if result.get("failure_reason") in ("IK_FAILURE", "IK_NO_SOLUTION") and not result.get("ik_fail_phase"):
             result["ik_fail_phase"] = getattr(sim, "_pickup_phase", None)
         _fill_fail_diag()
-        if W is not sim:
-            wp, wq = W.object_pose(tid)
-            if off_board:
-                world_ok = bowl_contains(wp, dest_xy)
-            else:
-                world_ok = square_of_body(W, cfg, tid) == dest and queen_upright(wq, tilt_max=0.5)
-            result["world_success"] = bool(world_ok)
+        wp, wq = W.object_pose(tid)
+        if off_board:
+            world_ok = bowl_contains(wp, dest_xy)
+        else:
+            world_ok = square_of_body(W, cfg, tid) == dest and queen_upright(wq, tilt_max=0.5)
+        result["world_success"] = bool(world_ok and not result["collateral"])
         annotate_episode(result)
         return result
 

@@ -29,14 +29,14 @@ from statistics import median
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
+from evaluate_move import tilt_deg as _tilt_deg  # noqa: E402
+
 OUT = ROOT / "sim" / "debug" / "harness"
 OPENING = [
     "a2a4", "b2b3", "c2c4", "d2d4", "e2e4", "f2f4", "g2g3", "h2h4", "b1c3", "g1f3",
     "a7a5", "b7b6", "c7c5", "d7d5", "e7e5", "f7f5", "g7g6", "h7h5", "b8c6", "g8f6",
 ]
 GAMES = ("opera", "immortal", "evergreen")
-DISPLACED_MM = 8.0
-TILTED_DEG = 30.0
 # A healthy episode peaks near 1.6 GB. This Mac has 16 GB physical RAM; five
 # workers plus Cursor push the machine into swap and look like a 60 GB spike.
 # The parent enforces both caps with SIGKILL: a worker stuck in a C call never
@@ -126,18 +126,6 @@ def _setup_world(world, cfg: dict, setup: list[str]) -> set[str]:
     return set(captured)
 
 
-def _world_snapshot(world, bodies) -> dict:
-    return {b: (world.body_pose(b)[0].copy(), world.body_pose(b)[1].copy()) for b in bodies}
-
-
-def _tilt_deg(q) -> float:
-    import numpy as np
-
-    w, x, y, z = q
-    zz = 1 - 2 * (x * x + y * y)
-    return float(np.degrees(np.arccos(np.clip(zz, -1, 1))))
-
-
 def _pads_in_piece(world, tid: str) -> dict:
     """Pad centres in the piece body frame (mm), plus contacts per pad."""
     import mujoco
@@ -177,11 +165,11 @@ def run_case(args: tuple[dict, str, float]) -> dict:
         import numpy as np
 
         import episode
+        import evaluate_move
         import perceive
         import pickup
         from mj import Sim, load_config
         from robot import jaw_squeezing, open_robot, world_of
-        from sequence import occupied_squares
         from squares import square_to_world
 
         orig_log = pickup.log_state
@@ -241,41 +229,24 @@ def run_case(args: tuple[dict, str, float]) -> dict:
         sim.quiet = True
         pickup.seed_vertical(sim, cfg, snap=True)
         src, dst = case["move"][:2], case["move"][2:4]
-        occ = occupied_squares(world, cfg)
+        occ, before = evaluate_move.board_snapshot(world, cfg)
         mover, victim = occ.get(src), occ.get(dst)
-        pieces = [b for b in occ.values()]
-        before = _world_snapshot(world, pieces)
         t_setup = time.time()
         r = episode.play_move(sim, cfg, case["move"], use_vision=True)
         row["t_move"] = round(time.time() - t_setup, 1)
-        after = _world_snapshot(world, pieces)
-        occ_after = occupied_squares(world, cfg)
-        mover_ok = mover is not None and occ_after.get(dst) == mover and _tilt_deg(after[mover][1]) < TILTED_DEG
-        victim_gone = victim is None or victim not in occ_after.values()
-        disturbed = []
-        for b in pieces:
-            if b in (mover, victim):
-                continue
-            d = float(np.linalg.norm(after[b][0][:2] - before[b][0][:2])) * 1000
-            tilt = _tilt_deg(after[b][1])
-            if d > DISPLACED_MM or tilt > TILTED_DEG:
-                disturbed.append({"body": b, "mm": round(d, 1), "tilt": round(tilt, 1)})
-        if mover is not None:
-            dxy = square_to_world(dst, cfg, z=0.0)
-            row["mover_final"] = {
-                "xyz_mm": [round(float(v) * 1000, 1) for v in after[mover][0]],
-                "off_dest_mm": round(float(np.hypot(*(after[mover][0][:2] - np.asarray(dxy[:2])))) * 1000, 1),
-                "tilt": round(_tilt_deg(after[mover][1]), 1),
-            }
+        score = evaluate_move.score_board_move(world, cfg, before, mover, victim, dst)
+        ok = score["ok"]
+        if "mover_final" in score:
+            row["mover_final"] = score["mover_final"]
             if hasattr(sim, "known"):
                 row["mover_believed"] = mover in sim.known
         row.update(
-            ok=bool(mover_ok and victim_gone and not disturbed),
-            mover_ok=bool(mover_ok),
-            victim_gone=bool(victim_gone),
-            disturbed=disturbed,
+            ok=ok,
+            mover_ok=score["mover_ok"],
+            victim_gone=score["victim_gone"],
+            disturbed=score["disturbed"],
             claimed=bool(r.get("success")),
-            reason=r.get("failure_reason") if not r.get("success") else (None if mover_ok and victim_gone and not disturbed else ("COLLATERAL_KNOCK" if disturbed else "BELIEF_WRONG")),
+            reason=r.get("failure_reason") if not r.get("success") else (None if ok else ("COLLATERAL_KNOCK" if score["disturbed"] else "BELIEF_WRONG")),
             fallen_after=r.get("fallen_after"),
             grasp_check=r.get("grasp_check"),
             stage=r.get("failure_stage"),

@@ -31,6 +31,7 @@ import chess.pgn
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
+import evaluate_move
 from episode import discard_square, occupancy_text, play_move
 from fast import clock_scale
 from mj import DEBUG_DIR, Sim, load_config
@@ -260,6 +261,8 @@ def main() -> int:
                 replay.push(move)
                 ok = True
                 last: dict = {}
+                occ0, before = evaluate_move.board_snapshot(world_of(sim), cfg)
+                involved = {occ0.get(sq) for leg in legs for sq in leg} | {occ0.get(hide)}
                 if hide:
                     dumped = discard_square(
                         sim,
@@ -297,6 +300,10 @@ def main() -> int:
                     if not last.get("success"):
                         ok = False
                         break
+                disturbed = evaluate_move.disturbed(world_of(sim), before, skip=involved)
+                if ok and disturbed:
+                    ok = False
+                    last = {**last, "failure_stage": "collateral", "failure_reason": "COLLATERAL_KNOCK"}
                 rec = {
                     "ply": i,
                     "san": san,
@@ -309,6 +316,7 @@ def main() -> int:
                     "stage": last.get("failure_stage") if not ok else None,
                     "reason": last.get("failure_reason") if not ok else None,
                     "captured": last.get("captured"),
+                    "disturbed": disturbed,
                 }
                 log.write(json.dumps(rec) + "\n")
                 log.flush()

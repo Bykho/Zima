@@ -26,11 +26,13 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
+import evaluate_move
 from episode import occupancy_text, play_move
 from mj import Sim, load_config
 from pickup import FULL_BOARD_XML, seed_vertical
 from robot import WALLS, open_robot, world_of
 from sequence import stow_idle_free_bodies
+from squares import parse_move
 
 
 def _summarize(result: dict) -> str:
@@ -173,12 +175,24 @@ def _hook_viewer(sim: Sim, viewer) -> None:
 
 
 def _run_move(sim, cfg, text: str, use_vision: bool, viewer) -> dict:
+    """play_move plus the world verdict: `ok` also needs the mover on its square and no bystander disturbed."""
     _hook_viewer(sim, viewer)
+    try:
+        src, dst = parse_move(text)
+    except ValueError:
+        src = dst = None
+    occ, before = evaluate_move.board_snapshot(world_of(sim), cfg)
     result = play_move(sim, cfg, text, use_vision=use_vision)
+    score = None if dst is None else evaluate_move.score_board_move(world_of(sim), cfg, before, occ.get(src), occ.get(dst), dst)
+    result["world"] = score
+    result["ok"] = bool(result.get("success") and score and score["ok"])
     print(_summarize(result))
     detail = _fail_detail(result)
     if detail:
         print(detail)
+    if score and result.get("success") and not score["ok"]:
+        what = f"disturbed {[d['body'] for d in score['disturbed']]}" if score["disturbed"] else "mover not on its square"
+        print(f"FAIL  world: {what}")
     _sync_viewer(viewer)
     _hook_viewer(sim, viewer)
     return result
@@ -240,7 +254,7 @@ def main() -> int:
                 except ValueError:
                     continue
                 result = _run_move(sim, cfg, joined, use_vision, viewer)
-                if not result.get("success"):
+                if not result["ok"]:
                     code = 1
                 buf = []
             if buf:
@@ -274,7 +288,7 @@ def main() -> int:
                     print("e2 e4  |  board  |  reset  |  quit")
                     continue
                 result = _run_move(sim, cfg, line, use_vision, viewer)
-                if not result.get("success"):
+                if not result["ok"]:
                     code = 1
     finally:
         if viewer is not None:
