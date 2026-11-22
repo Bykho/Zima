@@ -1,0 +1,35 @@
+{
+  "tag": "step3_core",
+  "suites": [
+    "core"
+  ],
+  "walls": [
+    "real",
+    "cheat"
+  ],
+  "jobs": 2,
+  "only": [],
+  "episodes": 104,
+  "started": "2026-11-22T15:22:07",
+  "commit": "780b1ec747f8b1a2ed08cc57ce124f177981b8c3",
+  "dirty": false,
+  "diff_sha": null,
+  "config_sha": "3138c86592fe6fe0",
+  "host": "MacBookPro.localdomain",
+  "python": "3.13.1",
+  "worker_mem_cap_gb": 3.0,
+  "total_mem_cap_gb": 8.0,
+  "argv": [
+    "sim/run.py",
+    "--suite",
+    "core",
+    "--walls",
+    "real,cheat",
+    "--tag",
+    "step3_core"
+  ],
+  "finished": "2026-11-22T15:30:35",
+  "wall_clock_s": 508,
+  "baseline": "core_real",
+  "from_run": "step3_core"
+}
