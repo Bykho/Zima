@@ -34,6 +34,14 @@ def _chess(name: str, about: str, quick: tuple[str, ...] = ()) -> Suite:
                  about=about, quick=quick)
 
 
+def _grasp() -> Suite:
+    from suites import grasp
+
+    return Suite(cases=grasp.suite_cases, run=grasp.run_case, fail_row=grasp.fail_row,
+                 about="every kind x 12 yaws, one piece alone, d4 -> d6", record_walls=(),
+                 quick=("pawn_y000", "pawn_y030", "knight_y000", "knight_y210", "queen_y090", "king_y330"))
+
+
 SUITES: dict[str, Suite] = {
     "opening": _chess("opening", "20 first moves from the start position"),
     "opera": _chess("opera", "every plain ply of the Opera game"),
@@ -42,4 +50,5 @@ SUITES: dict[str, Suite] = {
     "games": _chess("games", "opera + immortal + evergreen"),
     "core": _chess("core", "opening + opera (52 moves)", quick=("open_e2e4", "open_b8c6", "opera_07_d4e5", "opera_24_a8d8")),
     "all": _chess("all", "opening + all three games"),
+    "grasp": _grasp(),
 }

@@ -1,0 +1,35 @@
+{
+  "tag": "grasp_6a",
+  "suites": [
+    "grasp"
+  ],
+  "walls": [
+    "cheat"
+  ],
+  "jobs": 2,
+  "only": [],
+  "ids": null,
+  "episodes": 72,
+  "started": "2026-11-22T15:53:09",
+  "commit": "32b651cbe503382c249e55d1bee3fff49f760939",
+  "dirty": true,
+  "diff_sha": "8edece9211131e41",
+  "config_sha": "3138c86592fe6fe0",
+  "host": "MacBookPro.localdomain",
+  "python": "3.13.1",
+  "worker_mem_cap_gb": 3.0,
+  "total_mem_cap_gb": 8.0,
+  "argv": [
+    "sim/run.py",
+    "--suite",
+    "grasp",
+    "--walls",
+    "cheat",
+    "--tag",
+    "grasp_6a"
+  ],
+  "finished": "2026-11-22T15:54:03",
+  "wall_clock_s": 54,
+  "baseline": "grasp_cheat",
+  "from_run": "grasp_6a"
+}
