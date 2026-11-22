@@ -227,7 +227,7 @@ def test_home_clears_pieces():
     sim.hold(sim.qpos())
     for _ in range(16):
         sim.step()
-    seed_vertical(sim, cfg, snap=False)
+    seed_vertical(sim, cfg)
     q1, quat1 = sim.object_pose("queen_d1")
     gpos, _ = sim.site_pose(EE_SITE)
     drift = float(np.linalg.norm(q1[:2] - q0[:2]))
