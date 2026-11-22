@@ -7,7 +7,7 @@ through the robot wall. A fresh process per case keeps episodes independent.
 
   python sim/harness.py                              # opening suite, cheat + perception
   python sim/harness.py --suite opera --walls perception
-  python sim/harness.py --suite all --jobs 5 --tag baseline
+  python sim/harness.py --suite all --jobs 2 --tag baseline
 """
 
 from __future__ import annotations
@@ -37,11 +37,12 @@ OPENING = [
 GAMES = ("opera", "immortal", "evergreen")
 DISPLACED_MM = 8.0
 TILTED_DEG = 30.0
-# A healthy episode peaks near 1.6 GB; runaways have taken the machine past 60 GB.
+# A healthy episode peaks near 1.6 GB. This Mac has 16 GB physical RAM; five
+# workers plus Cursor push the machine into swap and look like a 60 GB spike.
 # The parent enforces both caps with SIGKILL: a worker stuck in a C call never
 # runs a Python signal handler, and RSS on macOS hides compressed pages.
-WORKER_MEM_CAP_GB = float(os.environ.get("ZIMA_MEM_CAP_GB", 6.0))
-TOTAL_MEM_CAP_GB = float(os.environ.get("ZIMA_TOTAL_MEM_CAP_GB", 40.0))
+WORKER_MEM_CAP_GB = float(os.environ.get("ZIMA_MEM_CAP_GB", 3.0))
+TOTAL_MEM_CAP_GB = float(os.environ.get("ZIMA_TOTAL_MEM_CAP_GB", 8.0))
 _PHASES = None  # child end of the pipe to the parent, for the last phase reached before a kill
 
 
@@ -404,7 +405,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--suite", default="opening", help="opening | opera | immortal | evergreen | games | core (opening+opera) | all")
     ap.add_argument("--walls", default="cheat,perception", help="comma list of robot walls")
-    ap.add_argument("--jobs", type=int, default=5)
+    ap.add_argument("--jobs", type=int, default=2)
     ap.add_argument("--timeout", type=float, default=90.0, help="seconds per case")
     ap.add_argument("--only", default="", help="comma-separated substrings; keep cases whose id contains any")
     ap.add_argument("--tag", default="latest")

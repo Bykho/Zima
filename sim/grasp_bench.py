@@ -106,7 +106,7 @@ def main() -> None:
     ap.add_argument("--square", default="d4")
     ap.add_argument("--dest", default="d6")
     ap.add_argument("--closed", type=float, default=None, help="gripper close target; default = the PIECES table")
-    ap.add_argument("--jobs", type=int, default=5)
+    ap.add_argument("--jobs", type=int, default=2)
     ap.add_argument("--tag", default="latest")
     args = ap.parse_args()
     kinds = args.kinds.split(",")
