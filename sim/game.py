@@ -222,7 +222,7 @@ def main() -> int:
     sim = open_robot(Sim(xml_path=FULL_BOARD_XML, cfg=cfg), args.wall)
     sim.quiet = True
     stow_idle_free_bodies(sim, cfg)
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
 
     viewer = None
     if want_view:

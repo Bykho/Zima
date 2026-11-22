@@ -48,7 +48,7 @@ def run_one(args: tuple[str, float, float | None, str, float | None, str]) -> di
                 world.place_object(name, [3.0 + 0.1 * k, 3.0, 0.02])
         sim = open_robot(world, "cheat")
         sim.quiet = True
-        pickup.seed_vertical(sim, cfg, snap=True)
+        pickup.seed_vertical(sim, cfg)
         seen: dict[str, dict] = {}
         tilts: list[tuple[str, float]] = []
         orig = pickup.log_state

@@ -227,7 +227,9 @@ def run_case(args: tuple[dict, str, float]) -> dict:
         world.step(60)
         sim = open_robot(world, wall)
         sim.quiet = True
-        pickup.seed_vertical(sim, cfg, snap=True)
+        _, at_start = evaluate_move.board_snapshot(world, cfg)
+        pickup.seed_vertical(sim, cfg)
+        row["home_disturbed"] = evaluate_move.disturbed(world, at_start)
         src, dst = case["move"][:2], case["move"][2:4]
         occ, before = evaluate_move.board_snapshot(world, cfg)
         mover, victim = occ.get(src), occ.get(dst)

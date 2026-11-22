@@ -220,7 +220,7 @@ def test_home_clears_pieces():
 
     cfg = load_config()
     sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     q0, _ = sim.object_pose("queen_d1")
     b = bowl_xyz(cfg)
     ok_ik = solve_ik(sim, [b[0], b[1], 0.04])
@@ -273,7 +273,7 @@ def test_reachable_approach_near_base():
 
     cfg = load_config()
     sim = Sim(cfg=cfg)
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     a5 = square_to_world("a5", cfg)
     d4 = square_to_world("d4", cfg)
     pre_a5 = find_pregrasp_pose(sim, cfg, a5)
@@ -311,7 +311,7 @@ def test_column_descend_tracks_xy():
 
     cfg = load_config()
     sim = Sim(cfg=cfg)
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     xy = square_to_world("d4", cfg)
     high = [xy[0], xy[1], 0.12]
     low = [xy[0], xy[1], 0.05]
@@ -359,7 +359,7 @@ def test_nest_stands_fallen():
 
     cfg = load_config()
     sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     xy = square_to_world("d4", cfg, z=0.028)
     half = 0.5 * np.pi
     quat = (float(np.cos(half / 2.0)), 0.0, float(np.sin(half / 2.0)), 0.0)
@@ -393,7 +393,7 @@ def test_place_b5_no_collateral():
     cfg = load_config()
     sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
     sim.quiet = True
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     sim.place_object("pawn_c7", square_to_world("c6", cfg, z=0.02))
     for _ in range(40):
         sim.step()
@@ -442,7 +442,7 @@ def test_nxb5_capture():
     cfg = load_config()
     sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
     sim.quiet = True
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     surface = float(cfg["sim"]["board"]["surface_z"])
 
     def put(body, sq):
@@ -495,7 +495,7 @@ def _queenside_capture(move: str, attacker: str, src: str, label: str):
     cfg = load_config()
     sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
     sim.quiet = True
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     surface = float(cfg["sim"]["board"]["surface_z"])
 
     def put(body, sq):
@@ -557,7 +557,7 @@ def test_queen_near_base_place():
     cfg = load_config()
     sim = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
     sim.quiet = True
-    seed_vertical(sim, cfg, snap=True)
+    seed_vertical(sim, cfg)
     sim.place_object("queen_d1", square_to_world("f3", cfg, z=0.02))
     for _ in range(40):
         sim.step()

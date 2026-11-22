@@ -256,15 +256,9 @@ def _vertical_seed(cfg: dict) -> dict:
 _CLEAR_GAP = 0.004
 
 
-def seed_vertical(sim: Sim, cfg: dict, snap: bool = False):
-    """Return to the vertical seed. Interpolate unless `snap` (game start)."""
+def seed_vertical(sim: Sim, cfg: dict):
+    """Return to the vertical seed under physics: rise over the pieces, transit, fold at the seed."""
     seed = _vertical_seed(cfg)
-    if snap:
-        sim.set_qpos(seed)
-        sim.hold(seed)
-        for _ in range(40):
-            sim.step()
-        return
     cur = sim.qpos()
     err = max(abs(cur.get(k, 0.0) - float(seed.get(k, 0.0))) for k in seed)
     if err < 0.03:
