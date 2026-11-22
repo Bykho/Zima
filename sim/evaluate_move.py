@@ -66,6 +66,50 @@ def score_board_move(world, cfg: dict, before: dict, mover: str | None, victim: 
     return out
 
 
+ROBOT_JAWS = ("gripper", "moving_jaw_so101_v1")
+
+
+class NeighborTracker:
+    """Peak shove, tilt and contact of named bystanders over an episode, from the world.
+
+    Install `step` as the controller's `on_step`; call `finish()` after the episode
+    for the per-neighbour peaks plus the final jaw clearance.
+    """
+
+    def __init__(self, world, ids, every: int = 4):
+        self.world, self.ids, self.every, self.n = world, list(ids), int(every), 0
+        self.start = {b: np.asarray(world.body_pose(b)[0][:2], dtype=float).copy() for b in self.ids}
+        self.peak = {b: {"contact": False, "robot_contact": False, "xy_disp_mm": 0.0, "tilt_deg": 0.0} for b in self.ids}
+
+    def step(self) -> None:
+        self.n += 1
+        if self.n % self.every == 0:
+            self.sample()
+
+    def sample(self) -> None:
+        for b in self.ids:
+            p, q = self.world.body_pose(b)
+            hits = [h for h in self.world.contacts_with(b) if h["other"] not in ("board", None)]
+            pk = self.peak[b]
+            pk["contact"] = pk["contact"] or bool(hits)
+            pk["robot_contact"] = pk["robot_contact"] or any(h["other"] in ROBOT_JAWS or (h["other"] or "").startswith("link") for h in hits)
+            pk["xy_disp_mm"] = max(pk["xy_disp_mm"], float(np.linalg.norm(np.asarray(p[:2]) - self.start[b])) * 1000)
+            pk["tilt_deg"] = max(pk["tilt_deg"], tilt_deg(q))
+
+    def finish(self) -> list[dict]:
+        from pickup import min_body_gap
+
+        self.sample()
+        out = []
+        for b in self.ids:
+            gap = min(min_body_gap(self.world, b, j) for j in ROBOT_JAWS)
+            pk = self.peak[b]
+            out.append({"id": b, "contact": pk["contact"], "robot_contact": pk["robot_contact"],
+                        "xy_disp_mm": round(pk["xy_disp_mm"], 1), "tilt_deg": round(pk["tilt_deg"], 1),
+                        "clearance_mm": round(gap * 1000, 1)})
+        return out
+
+
 LIFTED_MM = 10.0
 
 

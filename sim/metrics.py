@@ -72,10 +72,6 @@ def annotate_episode(result: dict) -> dict:
         result["obstruction_phase"] = None
     if result.get("ik_fail_phase") is None and reason in ("IK_FAILURE", "IK_NO_SOLUTION"):
         result["ik_fail_phase"] = result.get("fail_phase")
-    if result.get("neighbor_contact") is None:
-        result["neighbor_contact"] = False
-    if "neighbor_displacement" not in result:
-        result["neighbor_displacement"] = None
     knocked = result.get("failure_reason") in ("APPROACH_COLLISION",)
     reached = bool(result.get("approach_reached"))
     ik = bool(result.get("ik_solved"))

@@ -31,16 +31,12 @@ def neighbor_squares(source: str) -> list[str]:
     return out
 
 
-def occupied_neighbor_bodies(sim, cfg: dict, source: str, scenario: dict | None = None) -> dict[str, str]:
+def occupied_neighbor_bodies(sim, cfg: dict, source: str) -> dict[str, str]:
     """Map occupied neighbor squares of `source` to a collision body name."""
     import mujoco
 
     want = set(neighbor_squares(source))
     found: dict[str, str] = {}
-    for nb in (scenario or {}).get("neighbors") or []:
-        sq = nb.get("square")
-        if sq in want:
-            found[sq] = nb.get("id", "pawn")
     size = float(cfg.get("sim", {}).get("board", {}).get("square_size", 0.0375))
     for i in range(sim.model.nbody):
         name = mujoco.mj_id2name(sim.model, mujoco.mjtObj.mjOBJ_BODY, i)
@@ -939,7 +935,7 @@ def plan_approach(
 
     occ: dict[str, str] = {}
     if neighbors and source and cfg is not None:
-        occ = occupied_neighbor_bodies(sim, cfg, source, scenario)
+        occ = occupied_neighbor_bodies(sim, cfg, source)
     # Aperture is a search dimension, widest first: the wide jaw is the most
     # forgiving grasp, but on a crowded board it reaches into the next square
     # along the pinch axis, so each roll is retried narrower before moving on.

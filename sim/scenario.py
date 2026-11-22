@@ -99,24 +99,6 @@ HIDE_XYZ = [2.0, 2.0, 0.02]
 OFFSET_1D_MM = (0, 1, 2, 3, 5, 7, 10)
 OFFSET_2D_MM = (5, 10)
 PERC_ERR_MM = (-8, -6, -4, -2, 0, 2, 4, 6, 8)
-NOM_GRASP_XY_MM = (3.76, 8.66)
-COMP_DELTA_MM = (-4, -2, 0, 2, 4)
-PROBE_ERR_MM = (
-    (0, 0),
-    (2, 0),
-    (-2, 0),
-    (0, 2),
-    (0, -2),
-    (2, 2),
-    (2, -2),
-    (-2, 2),
-    (-2, -2),
-    (4, 0),
-    (-4, 0),
-    (0, 4),
-    (0, -4),
-)
-
 
 def scenario(**kwargs) -> dict:
     s = {
@@ -126,10 +108,8 @@ def scenario(**kwargs) -> dict:
         "dest": "d4",
         "offset_xy": [0.0, 0.0],
         "yaw_deg": 0.0,
-        "neighbors": [],
         "geometry": QUEEN_GEOM,
         "perception": "gt",
-        "pose_error_xy": [0.0, 0.0],
         "seed": 0,
         "quiet": False,
     }
@@ -181,23 +161,6 @@ def position_offset_scenarios() -> list[dict]:
                     quiet=True,
                 )
             )
-    return cases
-
-
-def probe_error_scenarios(grasp_xy_offset=None) -> list[dict]:
-    cases = []
-    off = None
-    if grasp_xy_offset is not None:
-        off = [float(grasp_xy_offset[0]), float(grasp_xy_offset[1])]
-    for x, y in PROBE_ERR_MM:
-        kw = dict(
-            name=f"probe_{x:+d}_{y:+d}mm",
-            pose_error_xy=[x / 1000.0, y / 1000.0],
-            quiet=True,
-        )
-        if off is not None:
-            kw["grasp_xy_offset"] = off
-        cases.append(scenario(**kw))
     return cases
 
 

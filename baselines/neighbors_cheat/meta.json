@@ -1,0 +1,40 @@
+{
+  "tag": "ev_6c",
+  "suites": [
+    "offsets",
+    "perception_error",
+    "robustness",
+    "neighbors",
+    "transport"
+  ],
+  "walls": [
+    "cheat",
+    "real"
+  ],
+  "jobs": 2,
+  "only": [],
+  "ids": null,
+  "episodes": 912,
+  "started": "2026-11-22T17:57:48",
+  "commit": "6c12cf7f15cad8924d6d9fb12c057cf6d43fa955",
+  "dirty": true,
+  "diff_sha": "f37da813adbb8c69",
+  "config_sha": "3138c86592fe6fe0",
+  "host": "MacBookPro.lan",
+  "python": "3.13.1",
+  "worker_mem_cap_gb": 3.0,
+  "total_mem_cap_gb": 8.0,
+  "argv": [
+    "sim/run.py",
+    "--suite",
+    "offsets,perception_error,robustness,neighbors,transport",
+    "--walls",
+    "cheat,real",
+    "--tag",
+    "ev_6c"
+  ],
+  "finished": "2026-11-22T18:02:48",
+  "wall_clock_s": 300,
+  "baseline": "neighbors_cheat",
+  "from_run": "ev_6c"
+}

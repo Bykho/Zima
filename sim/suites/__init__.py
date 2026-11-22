@@ -52,9 +52,24 @@ def _pickups(name: str) -> Suite:
                      about="piece x square on an empty board (chess_scene_pieces.xml)", report=pickups.report_matrix,
                      quick=("empty_pawn_d1_d4_gt", "empty_queen_d4_e4_gt", "empty_knight_a4_d4_gt",
                             "dest_queen_d1_h6_gt", "empty_queen_d1_d4_vision"))
-    return Suite(cases=pickups.starting_cases, run=pickups.run_starting, fail_row=pickups.fail_row, timeout=150.0,
-                 about="pick-and-lift of every man on the starting board, gt + vision", report=pickups.report_starting,
-                 record_walls=(), quick=("pick_queen_d1_gt", "pick_pawn_a2_gt", "pick_king_e1_gt", "pick_queen_d1_vision"))
+    if name == "starting":
+        return Suite(cases=pickups.starting_cases, run=pickups.run_starting, fail_row=pickups.fail_row, timeout=150.0,
+                     about="pick-and-lift of every man on the starting board, gt + vision", report=pickups.report_starting,
+                     record_walls=(), quick=("pick_queen_d1_gt", "pick_pawn_a2_gt", "pick_king_e1_gt", "pick_queen_d1_vision"))
+    cases, about, quick = {
+        "offsets": (pickups.offsets_cases, "queen spawned off the d1 centre, pick-and-lift (chess_scene.xml)",
+                    ("pos_x_+0mm", "pos_x_+10mm", "pos_xy_+5_+5mm")),
+        "perception_error": (pickups.perception_error_cases, "perceived queen XY off by -8..+8 mm, pick-and-lift",
+                             ("perc_+0_+0mm", "perc_+4_-4mm", "perc_-8_+8mm")),
+        "neighbors": (pickups.neighbors_cases, "one pawn beside d1, pick-and-lift",
+                      ("neighbor_left_c1", "neighbor_front_d2")),
+        "transport": (pickups.transport_cases, "d1 -> d4 with one pawn near d1, full move",
+                      ("transport_none", "transport_d2")),
+    }[name]
+    report = {"offsets": pickups.report_offsets, "perception_error": pickups.report_perception_error,
+              "neighbors": pickups.report_neighbors,
+              "transport": pickups.report_neighbors}[name]
+    return Suite(cases=cases, run=pickups.run_queen, fail_row=pickups.fail_row, about=about, quick=quick, report=report)
 
 
 SUITES: dict[str, Suite] = {
@@ -68,4 +83,5 @@ SUITES: dict[str, Suite] = {
     "grasp": _grasp(),
     "matrix": _pickups("matrix"),
     "starting": _pickups("starting"),
+    **{n: _pickups(n) for n in ("offsets", "perception_error", "neighbors", "transport")},
 }

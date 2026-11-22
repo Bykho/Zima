@@ -26,35 +26,24 @@ from sequence import (
 from squares import bowl_xyz, parse_move, square_to_world
 
 
-def _setup_board(sim, cfg: dict, sc: dict, tid: str, source: str, spawn, surface: float, yaw_deg: float) -> dict:
-    """Park unused free bodies off the table, place the target and its neighbours.
+def _setup_board(sim, cfg: dict, sc: dict, tid: str, source: str, spawn, yaw_deg: float) -> None:
+    """Park unused free bodies off the table and place the target.
 
     A 32-piece board already has every man on its square — leave it alone.
     On a populated board, pieces sitting on other squares stay put.
     """
     if sim.body_model_pos("pawn_e2") is not None:
-        return {}
-    keep = {tid}
-    for nb in sc.get("neighbors") or []:
-        keep.add(nb.get("id", "pawn"))
+        return
     populated = bool(sc.get("populated"))
     occ = occupied_squares(sim, cfg)
     for name in PIECE_BODIES:
-        if name in keep:
+        if name == tid:
             continue
         sitting = [sq for sq, body in occ.items() if body == name]
         if populated and sitting and source not in sitting:
             continue
         sim.place_object(name, HIDE_XYZ)
     sim.place_object(tid, spawn, yaw_quat(yaw_deg))
-    neighbor_start = {}
-    for nb in sc.get("neighbors") or []:
-        nid = nb.get("id", "pawn")
-        nsq = nb.get("square")
-        npos = square_to_world(nsq, cfg, z=surface) if nsq else list(nb.get("xyz", [0.37, 0.05, -0.5]))
-        sim.place_object(nid, npos, yaw_quat(float(nb.get("yaw_deg", 0.0))))
-        neighbor_start[nid] = npos[:2]
-    return neighbor_start
 
 
 def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:
@@ -81,9 +70,8 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
         base = square_to_world(source, cfg, z=surface)
         spawn = [base[0] + offset_xy[0], base[1] + offset_xy[1], base[2]]
 
-    neighbor_start = {}
     if reset_board:
-        neighbor_start = _setup_board(sim, cfg, sc, tid, source, spawn, surface, yaw_deg)
+        _setup_board(sim, cfg, sc, tid, source, spawn, yaw_deg)
 
     stack: list[UnstackFrame] = []
     unstack_log: list[dict] = []
@@ -215,8 +203,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
     result = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=spawn_xy, scenario=target_sc)
     result["unstack"] = unstack_log
     result["stop_after"] = sc.get("stop_after")
-    if neighbor_start and not result.get("_neighbor_start"):
-        result["_neighbor_start"] = neighbor_start
 
     still_held = bool((result.get("place_diag") or {}).get("still_held"))
     gripper_busy = still_held and not result.get("placement_success")

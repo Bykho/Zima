@@ -131,22 +131,9 @@ def _descend_fail_reason(desc: dict) -> str:
     return "APPROACH_TRACK_FAIL"
 
 
-def _xy_seg_dist(p, a, b) -> float:
-    p = np.asarray(p[:2], dtype=float)
-    a = np.asarray(a[:2], dtype=float)
-    b = np.asarray(b[:2], dtype=float)
-    ab = b - a
-    den = float(np.dot(ab, ab))
-    t = 0.0 if den < 1e-12 else float(np.clip(np.dot(p - a, ab) / den, 0.0, 1.0))
-    return float(np.linalg.norm(p - (a + t * ab)))
-
-
-def carry_blocked(obstacles_xy, start_xy, dest_xy, radius: float = 0.028) -> bool:
-    """True if any obstacle XY is inside `radius` of the start→dest segment."""
-    for o in obstacles_xy:
-        if _xy_seg_dist(o, start_xy, dest_xy) < radius:
-            return True
-    return False
+def perceived_xy(sim: Sim, xyz) -> list[float]:
+    """Target XY handed from observe to grasp planning. Study suites wrap this to inject perception error."""
+    return [float(xyz[0]), float(xyz[1])]
 
 
 def yaw_quat(deg: float) -> tuple[float, float, float, float]:
@@ -2709,7 +2696,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     perception = sc.get("perception", "vision" if use_vision else "gt")
     use_vision = perception == "vision"
     offset_xy = [float(v) for v in sc.get("offset_xy", [0.0, 0.0])]
-    pose_err = [float(v) for v in sc.get("pose_error_xy", [0.0, 0.0])]
     yaw_deg = float(sc.get("yaw_deg", 0.0))
     geom = dict(sc.get("geometry") or PIECES.get(body_kind(tid) or tid) or {})
     off = sc.get("grasp_xy_offset", geom.get("grasp_xy_offset", p.get("grasp_xy_offset", [0.0, 0.0])))
@@ -2759,12 +2745,8 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         "use_vision": use_vision,
         "perception": perception,
         "offset_xy_mm": [offset_xy[0] * 1000.0, offset_xy[1] * 1000.0],
-        "pose_error_xy_mm": [pose_err[0] * 1000.0, pose_err[1] * 1000.0],
         "yaw_deg": yaw_deg,
-        "neighbors": sc.get("neighbors", []),
         "geometry": sc.get("geometry"),
-        "neighbor_contact": False,
-        "neighbor_displacement": None,
         "grasp_xy_offset_mm": [float(off[0]) * 1000.0, float(off[1]) * 1000.0],
         "ik_solved": False,
         "approach_reached": False,
@@ -2887,67 +2869,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
 
     sim.on_step = _clutter_hook
 
-    nb_peak_disp = [0.0]
-    nb_peak_tilt = [0.0]
-    nb_peak_contact = [False]
-    nb_min_clear = [None]
-    nb_hook_n = [0]
-
-    def _track_neighbors(*, with_gap: bool = False):
-        nids = [n.get("id", "pawn") for n in (sc.get("neighbors") or [])]
-        if not nids:
-            return
-        starts = result.get("_neighbor_start") or {}
-        stats = []
-        any_contact = nb_peak_contact[0]
-        for nid in nids:
-            p, q = W.object_pose(nid)
-            p0 = np.asarray(starts.get(nid, p[:2]), dtype=float)
-            hits = [h for h in W.contacts_with(nid) if h["other"] not in ("board", None)]
-            robot_hit = any(
-                h["other"] in ("gripper", "moving_jaw_so101_v1") or (h["other"] or "").startswith("link")
-                for h in hits
-            )
-            any_contact = any_contact or bool(hits)
-            disp = float(np.linalg.norm(p[:2] - p0[:2]) * 1000)
-            tilt = queen_tilt_deg(q)
-            nb_peak_disp[0] = max(nb_peak_disp[0], disp)
-            nb_peak_tilt[0] = max(nb_peak_tilt[0], tilt)
-            cl = None
-            if with_gap:
-                cl = min(
-                    min_body_gap(W, nid, "gripper"),
-                    min_body_gap(W, nid, "moving_jaw_so101_v1"),
-                )
-                if nb_min_clear[0] is None:
-                    nb_min_clear[0] = cl
-                else:
-                    nb_min_clear[0] = min(nb_min_clear[0], cl)
-            stats.append(
-                {
-                    "id": nid,
-                    "contact": bool(hits),
-                    "robot_contact": robot_hit,
-                    "xy_disp_mm": nb_peak_disp[0],
-                    "tilt_deg": nb_peak_tilt[0],
-                    "clearance_mm": None if cl is None else float(cl * 1000),
-                }
-            )
-        nb_peak_contact[0] = any_contact
-        result["neighbor_eval"] = stats
-        result["neighbor_contact"] = nb_peak_contact[0]
-        result["neighbor_displacement"] = nb_peak_disp[0]
-        result["neighbor_tilt"] = nb_peak_tilt[0]
-        if with_gap:
-            result["min_robot_neighbor_clearance_mm"] = (
-                None if nb_min_clear[0] is None else float(nb_min_clear[0] * 1000)
-            )
-
-    def _nb_hook():
-        nb_hook_n[0] += 1
-        if nb_hook_n[0] % 4 == 0:
-            _track_neighbors()
-
     def _fill_fail_diag():
         pos, _ = W.site_pose(EE_SITE)
         reason = result.get("failure_reason")
@@ -3062,7 +2983,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             result["neighbor_collision_phase"] = fc.get("phase")
 
     def _done():
-        _track_neighbors(with_gap=True)
         _track_clutter()
         _collateral_check()
         if result.get("failure_reason") in ("IK_FAILURE", "IK_NO_SOLUTION") and not result.get("ik_fail_phase"):
@@ -3085,14 +3005,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     result["spawn_xyz"] = _xyz(spawn)
     if sc.get("place_target", True):
         sim.place_object(tid, spawn, yaw_quat(yaw_deg))
-        neighbor_start = {}
-        for nb in sc.get("neighbors") or []:
-            nid = nb.get("id", "pawn")
-            nsq = nb.get("square")
-            npos = square_to_world(nsq, cfg, z=surface) if nsq else list(nb.get("xyz", [0.37, 0.05, -0.5]))
-            sim.place_object(nid, npos, yaw_quat(float(nb.get("yaw_deg", 0.0))))
-            neighbor_start[nid] = npos[:2]
-        result["_neighbor_start"] = neighbor_start
     if sc.get("seed_home", sc.get("reset_board", True)):
         seed_vertical(sim, cfg)
     gpos, _ = sim.site_pose(EE_SITE)
@@ -3175,13 +3087,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             return again if again is not None else _done()
         log_state(sim, "002_observe", extra={"target": _xyz(observe)})
         queen_xyz, _ = sim.object_pose(tid)
-    plan_xy = [float(queen_xyz[0] + pose_err[0]), float(queen_xyz[1] + pose_err[1])]
-    obstacles = []
-    for nb in sc.get("neighbors") or []:
-        nid = nb.get("id", "pawn")
-        npos, _ = sim.object_pose(nid)
-        if npos[2] > 0.0:
-            obstacles.append(npos[:2])
+    plan_xy = perceived_xy(sim, queen_xyz)
     # Vertical pinch: put the wrist where gripper +X is world-down at the
     # grasp point before anything downstream snapshots the heading. Without
     # this the observe pose's 30-50 deg flex was inherited (approach planner
@@ -3202,8 +3108,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             sim, cfg, use_vision, sc, result, tid, surface, release_open
         )
         return again if again is not None else _done()
-    blocked = carry_blocked(obstacles, pre[:2], dest_xy[:2])
-    result["transport_path"] = "clearance" if blocked else "straight"
+    result["transport_path"] = "straight"
     clutter = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
     result["occupied_neighbors"] = sorted(clutter)
     grasp_plan = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
@@ -3312,7 +3217,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         refined = locate_queen(sim, cfg, result, source)
         if refined is not None:
             queen_xyz = refined
-            plan_xy = [float(queen_xyz[0] + pose_err[0]), float(queen_xyz[1] + pose_err[1])]
+            plan_xy = perceived_xy(sim, queen_xyz)
             grasp_xy = _grasp_xy_for_roll(sim, plan_xy, surface + grasp_z, geom, approach.get("roll"))
             # The plan was verified against the long-range estimate. Re-check
             # the chosen approach on the refined grasp; if the jaws would now
@@ -3356,8 +3261,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     ]
     grasp = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
     result["ee_requested"] = _xyz(grasp)
-    blocked = carry_blocked(obstacles, grasp[:2], dest_xy[:2])
-    result["transport_path"] = "clearance" if blocked else "straight"
+    result["transport_path"] = "straight"
     column = _descend_column(sim, grasp, grasp_lock)
     result["descend_column"] = column is not None or getattr(sim, "plumb_fail", None)
     desc = physical_descend(
@@ -3500,7 +3404,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     def _on_step():
         if prev_step:
             prev_step()
-        _nb_hook()
         _transit_hook()
 
     sim.on_step = _on_step
