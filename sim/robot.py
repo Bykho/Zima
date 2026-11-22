@@ -287,9 +287,6 @@ class Robot(Sim):
         super().set_body_pos(name, xyz)
         return ok
 
-    def tint_body(self, name: str, rgba) -> bool:
-        return self._world.tint_body(name, rgba)
-
     def apply_arm_base(self, pos=None) -> None:
         super().apply_arm_base(pos)
         world = getattr(self, "_world", None)

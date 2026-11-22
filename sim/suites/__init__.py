@@ -6,7 +6,8 @@ stage and t. Register a new one by adding a `Suite` to SUITES.
 
 `quick` names the case ids `verify --studies` runs: on `gate_wall` they must not
 regress against `baselines/<suite>_<gate_wall>`; on `record_walls` they are
-compared and printed but do not fail verify.
+compared and printed but do not fail verify. `report` adds a suite-specific
+view (grids, board maps) to the run summary.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ class Suite:
     quick: tuple[str, ...] = ()
     gate_wall: str = "cheat"
     record_walls: tuple[str, ...] = ("real",)
+    report: Callable[[list[dict]], str] | None = None
 
 
 def _chess(name: str, about: str, quick: tuple[str, ...] = ()) -> Suite:
@@ -42,6 +44,19 @@ def _grasp() -> Suite:
                  quick=("pawn_y000", "pawn_y030", "knight_y000", "knight_y210", "queen_y090", "king_y330"))
 
 
+def _pickups(name: str) -> Suite:
+    from suites import pickups
+
+    if name == "matrix":
+        return Suite(cases=pickups.matrix_cases, run=pickups.run_matrix, fail_row=pickups.fail_row,
+                     about="piece x square on an empty board (chess_scene_pieces.xml)", report=pickups.report_matrix,
+                     quick=("empty_pawn_d1_d4_gt", "empty_queen_d4_e4_gt", "empty_knight_a4_d4_gt",
+                            "dest_queen_d1_h6_gt", "empty_queen_d1_d4_vision"))
+    return Suite(cases=pickups.starting_cases, run=pickups.run_starting, fail_row=pickups.fail_row, timeout=150.0,
+                 about="pick-and-lift of every man on the starting board, gt + vision", report=pickups.report_starting,
+                 record_walls=(), quick=("pick_queen_d1_gt", "pick_pawn_a2_gt", "pick_king_e1_gt", "pick_queen_d1_vision"))
+
+
 SUITES: dict[str, Suite] = {
     "opening": _chess("opening", "20 first moves from the start position"),
     "opera": _chess("opera", "every plain ply of the Opera game"),
@@ -51,4 +66,6 @@ SUITES: dict[str, Suite] = {
     "core": _chess("core", "opening + opera (52 moves)", quick=("open_e2e4", "open_b8c6", "opera_07_d4e5", "opera_24_a8d8")),
     "all": _chess("all", "opening + all three games"),
     "grasp": _grasp(),
+    "matrix": _pickups("matrix"),
+    "starting": _pickups("starting"),
 }

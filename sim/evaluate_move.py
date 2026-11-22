@@ -66,6 +66,23 @@ def score_board_move(world, cfg: dict, before: dict, mover: str | None, victim: 
     return out
 
 
+LIFTED_MM = 10.0
+
+
+def score_lift(world, cfg: dict, before: dict, mover: str, dst: str | None = None) -> dict:
+    """Verdict for a pick-and-lift: the mover is off the board surface, or (when the
+    episode ran on to a place) upright on `dst`, and no bystander was disturbed."""
+    from sequence import occupied_squares
+
+    surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+    p, q = world.body_pose(mover)
+    lifted = (float(p[2]) - surface) * 1000 > LIFTED_MM
+    placed = dst is not None and occupied_squares(world, cfg).get(dst) == mover and tilt_deg(q) < TILTED_DEG
+    hits = disturbed(world, before, skip=(mover,))
+    return {"ok": bool((lifted or placed) and not hits), "lifted": bool(lifted), "placed": bool(placed), "disturbed": hits,
+            "mover_final": {"xyz_mm": [round(float(v) * 1000, 1) for v in p], "tilt": round(tilt_deg(q), 1)}}
+
+
 def board_snapshot(world, cfg: dict) -> tuple[dict, dict]:
     """(square -> body, snapshot of those bodies) for the pieces now on the board."""
     from sequence import occupied_squares

@@ -13,7 +13,7 @@ import numpy as np
 from clearance import neighbor_squares, obstacle_bodies, plan_approach
 from ik import EE_SITE, grasp_xy_delta, solve_ik
 from mj import probing
-from scenario import HIDE_XYZ, PIECES, STARTING_AT, body_kind, is_piece_body
+from scenario import PIECES, STARTING_AT, body_kind, is_piece_body
 from squares import FILES, parse_square, square_to_world
 
 MAX_UNSTACK = 4
@@ -34,39 +34,11 @@ class UnstackFrame:
     kind: str
     home: str
     park: str
-    proxy_xyz: list[float]
-    as_proxy: bool = False
     body: str = ""
 
 
-SIDE_WHITE = (0.93, 0.90, 0.82, 1.0)
-SIDE_BLACK = (0.22, 0.18, 0.16, 1.0)
-
-
-def side_for_home(home: str) -> str:
-    try:
-        return "black" if int(str(home)[-1]) >= 7 else "white"
-    except (TypeError, ValueError):
-        return "white"
-
-
-def rgba_for_home(home: str):
-    return SIDE_BLACK if side_for_home(home) == "black" else SIDE_WHITE
-
-
 def piece_kind(square: str, body: str) -> str:
-    kind = body_kind(body)
-    if kind:
-        return kind
-    if body.startswith("proxy_"):
-        return STARTING_AT.get(body[6:], STARTING_AT.get(square, "pawn"))
-    return STARTING_AT.get(square, "pawn")
-
-
-def stow_idle_free_bodies(sim, cfg: dict) -> list[str]:
-    """No-op. Fallen pieces stay where physics left them."""
-    _ = (sim, cfg)
-    return []
+    return body_kind(body) or STARTING_AT.get(square, "pawn")
 
 
 def occupied_squares(sim, cfg: dict) -> dict[str, str]:
@@ -94,11 +66,9 @@ def neighbor_occupancy(sim, cfg: dict, source: str) -> dict[str, str]:
 
 
 def square_of_body(sim, cfg: dict, name: str) -> str | None:
-    """Occupancy square for a proxy or free body, or None if off-board."""
+    """Occupancy square for a free body, or None if off-board."""
     if not name:
         return None
-    if name.startswith("proxy_"):
-        return name[6:]
     occ = occupied_squares(sim, cfg)
     for sq, body in occ.items():
         if body == name:
@@ -247,40 +217,6 @@ def forward_blockers(source: str, occ: dict[str, str], skip_kinds: set[str]) -> 
         if r2 == rank + toward and abs(f2 - fi) <= 1:
             out.append(sq)
     return out
-
-
-def promote(sim, cfg: dict, square: str, kind: str) -> tuple[list[float], bool]:
-    """Spawn free `kind` on `square`. Hides the proxy actually sitting there.
-
-    After a piece has moved, occupancy is still `proxy_{home}` (e.g. proxy_d2
-    on d4), not `proxy_{square}`. Hiding only the latter leaves a visible
-    stand-in stacked on the free body; stow then parks the free body and the
-    arm chases HIDE_XYZ while the board still looks occupied.
-    """
-    surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
-    occ = occupied_squares(sim, cfg)
-    sitting = occ.get(square)
-    proxy = sitting if (sitting and str(sitting).startswith("proxy_")) else f"proxy_{square}"
-    saved = sim.body_model_pos(proxy)
-    xyz = [0.0, 0.0, -1.0] if saved is None else saved.tolist()
-    as_proxy = sitting is not None and str(sitting).startswith("proxy_")
-    if not as_proxy and saved is not None:
-        as_proxy = float(saved[2]) > 0.01
-    if as_proxy:
-        sim.hide_body(proxy)
-    sim.place_object(kind, square_to_world(square, cfg, z=surface))
-    home = proxy[6:] if str(proxy).startswith("proxy_") else square
-    sim.tint_body(kind, rgba_for_home(home))
-    sides = getattr(sim, "_kind_side", {})
-    sides[kind] = side_for_home(home)
-    sim._kind_side = sides
-    return xyz, as_proxy
-
-
-def restore_proxy(sim, kind: str, proxy_xyz: list[float], home: str) -> None:
-    """Park the free body off-board and put proxy_{home} back at proxy_xyz."""
-    sim.place_object(kind, HIDE_XYZ)
-    sim.set_body_pos(f"proxy_{home}", proxy_xyz)
 
 
 @probing

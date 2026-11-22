@@ -46,19 +46,16 @@ def occupied_neighbor_bodies(sim, cfg: dict, source: str, scenario: dict | None 
         name = mujoco.mj_id2name(sim.model, mujoco.mjtObj.mjOBJ_BODY, i)
         if not name or float(sim.data.xpos[i][2]) <= 0.0:
             continue
-        if name.startswith("proxy_"):
-            sq = name[6:]
-        elif body_kind(name):
-            sq = None
-            best = 0.55 * size
-            for nsq in want:
-                p = square_to_world(nsq, cfg)
-                d = float(np.hypot(float(sim.data.xpos[i][0]) - p[0], float(sim.data.xpos[i][1]) - p[1]))
-                if d < best:
-                    best = d
-                    sq = nsq
-        else:
+        if not body_kind(name):
             continue
+        sq = None
+        best = 0.55 * size
+        for nsq in want:
+            p = square_to_world(nsq, cfg)
+            d = float(np.hypot(float(sim.data.xpos[i][0]) - p[0], float(sim.data.xpos[i][1]) - p[1]))
+            if d < best:
+                best = d
+                sq = nsq
         if sq in want:
             found[sq] = name
     return found

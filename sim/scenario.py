@@ -258,7 +258,7 @@ def full_board_scenario(**kwargs) -> dict:
         name="full_board_d1_d4",
         quiet=kwargs.pop("quiet", False),
         target_id=kwargs.pop("target_id", "queen_d1"),
-        hide_proxy="d1",
+        populated=True,
     )
     kw.update(kwargs)
     return scenario(**kw)
@@ -357,18 +357,7 @@ def body_kind(name: str) -> str | None:
 def is_piece_body(name: str) -> bool:
     if not name:
         return False
-    if name.startswith("proxy_"):
-        return True
     return body_kind(name) is not None
-
-
-# Empty on a starting board (ranks 3–6). Near / center / far-center.
-STARTING_DESTS = ("d4", "a4", "e5")
-
-
-def populated_matrix_scenarios(perception: str = "gt") -> list[dict]:
-    """Legacy subset. Prefer starting_pickup_scenarios for the full board map."""
-    return starting_pickup_scenarios(perception, dest="d4", stop_after=None)
 
 
 def starting_pickup_scenarios(perception: str = "gt", dest: str = "d4", stop_after: str | None = "lift") -> list[dict]:
@@ -383,22 +372,9 @@ def starting_pickup_scenarios(perception: str = "gt", dest: str = "d4", stop_aft
                 dest,
                 perception=perception,
                 name=f"start_{tag}_{kind}_{src}_{dest}_{perception}",
-                hide_proxy=src,
+                populated=True,
                 stop_after=stop_after,
                 target_id=starting_body(kind, src),
             )
         )
     return cases
-
-
-def starting_place_scenario(kind: str, source: str, dest: str, perception: str = "gt") -> dict:
-    return piece_scenario(
-        kind,
-        source,
-        dest,
-        perception=perception,
-        name=f"start_place_{kind}_{source}_{dest}_{perception}",
-        hide_proxy=source,
-        stop_after=None,
-        target_id=starting_body(kind, source),
-    )

@@ -282,37 +282,6 @@ class Sim:
         mujoco.mj_forward(self.model, self.data)
         return True
 
-    def tint_body(self, name: str, rgba) -> bool:
-        """Override geom materials so a reused free body can be white or black."""
-        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
-        if bid < 0:
-            return False
-        color = np.asarray(rgba, dtype=np.float32)
-        if color.size == 3:
-            color = np.append(color, np.float32(1.0))
-        backup = getattr(self, "_geom_matid", None)
-        if backup is None:
-            backup = {}
-            self._geom_matid = backup
-        for gid in range(self.model.ngeom):
-            if int(self.model.geom_bodyid[gid]) != bid:
-                continue
-            if gid not in backup:
-                backup[gid] = int(self.model.geom_matid[gid])
-            self.model.geom_matid[gid] = -1
-            self.model.geom_rgba[gid] = color
-        mujoco.mj_forward(self.model, self.data)
-        return True
-
-    def body_rgba(self, name: str) -> np.ndarray | None:
-        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
-        if bid < 0:
-            return None
-        for gid in range(self.model.ngeom):
-            if int(self.model.geom_bodyid[gid]) == bid:
-                return np.asarray(self.model.geom_rgba[gid], dtype=np.float64).copy()
-        return None
-
     def set_body_pos(self, name: str, xyz) -> bool:
         """Move a static body (proxies) in the model."""
         bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)

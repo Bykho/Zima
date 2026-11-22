@@ -161,7 +161,7 @@ def test_unstack_policy():
         restore_order,
     )
 
-    occ = {"g1": "proxy_g1", "g2": "proxy_g2", "h2": "proxy_h2"}
+    occ = {"g1": "knight_g1", "g2": "pawn_g2", "h2": "pawn_h2"}
     home = choose_blocker("h1", occ, {"h1", "d4"}, {"rook"})
     ok_pawn = check("unstack prefers pawn", home == "g2", f"home={home}")
     occupied = {
@@ -173,7 +173,7 @@ def test_unstack_policy():
     }
     park = choose_park({}, occupied)
     ok_park = check("unstack parks a quiet empty square", park == "f4", f"park={park}")
-    home2 = choose_blocker("a2", {"a1": "proxy_a1", "b2": "proxy_b2"}, {"a2"}, {"pawn"})
+    home2 = choose_blocker("a2", {"a1": "rook_a1", "b2": "pawn_b2"}, {"a2"}, {"pawn"})
     ok_skip = check("unstack skips same type", home2 == "a1", f"home={home2}")
     moves = [
         Move("pawn", "g2", "d3"),
@@ -192,14 +192,14 @@ def test_unstack_policy():
         f"move={planned}",
     )
     stack = [
-        UnstackFrame("pawn", "g2", "d3", [0.0, 0.0, 0.0], True),
-        UnstackFrame("knight", "g1", "e3", [0.0, 0.0, 0.0], True),
+        UnstackFrame("pawn", "g2", "d3"),
+        UnstackFrame("knight", "g1", "e3"),
     ]
     last = stack.pop()
     ok_frame = check("unstack LIFO restore", last.kind == "knight" and last.home == "g1", last.home)
-    front = forward_blockers("g1", {"g2": "proxy_g2", "f1": "proxy_f1", "h2": "proxy_h2"}, {"knight"})
+    front = forward_blockers("g1", {"g2": "pawn_g2", "f1": "bishop_f1", "h2": "pawn_h2"}, {"knight"})
     ok_front = check("forward blockers are center-rank pawns", set(front) == {"g2", "h2"}, f"front={front}")
-    none = forward_blockers("a2", {"a1": "proxy_a1", "b2": "proxy_b2"}, {"pawn"})
+    none = forward_blockers("a2", {"a1": "rook_a1", "b2": "pawn_b2"}, {"pawn"})
     ok_none = check("forward blockers skip same type", none == [], f"front={none}")
     from pickup import bowl_contains, in_trash, in_well
 

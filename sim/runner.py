@@ -254,7 +254,11 @@ def run(suites: list[str], walls: list[str], *, jobs: int = DEFAULT_JOBS, timeou
     meta["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     meta["wall_clock_s"] = round(time.time() - t0)
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
-    report = summarize(rows) + f"\n\nwall clock {meta['wall_clock_s']}s   rows: {rows_path}"
+    report = summarize(rows)
+    for s in suites:
+        if SUITES[s].report:
+            report += "\n" + SUITES[s].report([r for r in rows if r.get("suite") == s])
+    report += f"\n\nwall clock {meta['wall_clock_s']}s   rows: {rows_path}"
     (run_dir / "summary.txt").write_text(report + "\n")
     return rows, run_dir
 

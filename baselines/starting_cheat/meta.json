@@ -1,0 +1,35 @@
+{
+  "tag": "starting_6b",
+  "suites": [
+    "starting"
+  ],
+  "walls": [
+    "cheat"
+  ],
+  "jobs": 2,
+  "only": [],
+  "ids": null,
+  "episodes": 64,
+  "started": "2026-11-22T16:21:57",
+  "commit": "b4fb557f50ecb69f9573ef6403df28048f8b77a4",
+  "dirty": true,
+  "diff_sha": "c05454fcab951a05",
+  "config_sha": "3138c86592fe6fe0",
+  "host": "MacBookPro.localdomain",
+  "python": "3.13.1",
+  "worker_mem_cap_gb": 3.0,
+  "total_mem_cap_gb": 8.0,
+  "argv": [
+    "sim/run.py",
+    "--suite",
+    "starting",
+    "--walls",
+    "cheat",
+    "--tag",
+    "starting_6b"
+  ],
+  "finished": "2026-11-22T16:25:06",
+  "wall_clock_s": 189,
+  "baseline": "starting_cheat",
+  "from_run": "starting_6b"
+}

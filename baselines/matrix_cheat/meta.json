@@ -1,0 +1,36 @@
+{
+  "tag": "matrix_6b",
+  "suites": [
+    "matrix"
+  ],
+  "walls": [
+    "cheat",
+    "real"
+  ],
+  "jobs": 2,
+  "only": [],
+  "ids": null,
+  "episodes": 224,
+  "started": "2026-11-22T16:14:25",
+  "commit": "b4fb557f50ecb69f9573ef6403df28048f8b77a4",
+  "dirty": true,
+  "diff_sha": "c05454fcab951a05",
+  "config_sha": "3138c86592fe6fe0",
+  "host": "MacBookPro.localdomain",
+  "python": "3.13.1",
+  "worker_mem_cap_gb": 3.0,
+  "total_mem_cap_gb": 8.0,
+  "argv": [
+    "sim/run.py",
+    "--suite",
+    "matrix",
+    "--walls",
+    "cheat,real",
+    "--tag",
+    "matrix_6b"
+  ],
+  "finished": "2026-11-22T16:21:53",
+  "wall_clock_s": 448,
+  "baseline": "matrix_cheat",
+  "from_run": "matrix_6b"
+}

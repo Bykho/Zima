@@ -71,15 +71,6 @@ def _tid(sim: Sim) -> str:
     return getattr(sim, "target_id", "queen")
 
 
-def _proxy_body_names(sim: Sim) -> list[str]:
-    names = []
-    for i in range(sim.model.nbody):
-        n = mujoco.mj_id2name(sim.model, mujoco.mjtObj.mjOBJ_BODY, i)
-        if n and n.startswith("proxy_"):
-            names.append(n)
-    return names
-
-
 def _camera_involved(other: str | None) -> bool:
     name = other or ""
     return name in CAMERA_BODIES or name.startswith("d405") or "camera" in name
@@ -2803,10 +2794,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
 
     def _clutter_names() -> list[str]:
         names = []
-        for name in _proxy_body_names(W):
-            bid = mujoco.mj_name2id(W.model, mujoco.mjtObj.mjOBJ_BODY, name)
-            if bid >= 0 and float(W.data.xpos[bid][2]) > 0.0 and not in_trash(W.data.xpos[bid], cfg) and not in_well(W.data.xpos[bid], cfg):
-                names.append(name)
         for i in range(W.model.nbody):
             name = mujoco.mj_id2name(W.model, mujoco.mjtObj.mjOBJ_BODY, i)
             if not name or name == tid or body_kind(name) is None:
@@ -2826,7 +2813,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         [
             i
             for i in range(W.model.nbody)
-            if (W.body_name(i) or "").startswith("proxy_") or body_kind(W.body_name(i)) is not None
+            if body_kind(W.body_name(i)) is not None
         ],
         dtype=int,
     )
@@ -2848,7 +2835,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         ok = ~np.isin(other, inert_ids) & (~np.isin(other, live) | (other == tid_bid))
         return bool(ok.any())
 
-    def _track_proxies():
+    def _track_clutter():
         if first_hit[0] is not None:
             return
         phase = getattr(sim, "_pickup_phase", None)
@@ -2893,12 +2880,12 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
 
     prev_all = sim.on_step
 
-    def _proxy_hook():
+    def _clutter_hook():
         if prev_all:
             prev_all()
-        _track_proxies()
+        _track_clutter()
 
-    sim.on_step = _proxy_hook
+    sim.on_step = _clutter_hook
 
     nb_peak_disp = [0.0]
     nb_peak_tilt = [0.0]
@@ -3076,7 +3063,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
 
     def _done():
         _track_neighbors(with_gap=True)
-        _track_proxies()
+        _track_clutter()
         _collateral_check()
         if result.get("failure_reason") in ("IK_FAILURE", "IK_NO_SOLUTION") and not result.get("ik_fail_phase"):
             result["ik_fail_phase"] = getattr(sim, "_pickup_phase", None)

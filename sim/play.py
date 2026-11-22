@@ -31,7 +31,6 @@ from episode import occupancy_text, play_move
 from mj import Sim, load_config
 from pickup import FULL_BOARD_XML, seed_vertical
 from robot import WALLS, open_robot, world_of
-from sequence import stow_idle_free_bodies
 from squares import parse_move
 
 
@@ -223,9 +222,6 @@ def main() -> int:
 
     cfg = load_config()
     sim = open_robot(Sim(xml_path=FULL_BOARD_XML, cfg=cfg), args.wall)
-    # Free pawn/rook/… bodies spawn under e5 in the XML. Arm seeding steps
-    # physics and they pop onto the square, so `board` prints a ghost P.
-    stow_idle_free_bodies(sim, cfg)
     seed_vertical(sim, cfg)
     start = _snapshot(sim)
     use_vision = not args.gt

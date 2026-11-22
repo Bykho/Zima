@@ -18,48 +18,34 @@ from scenario import HIDE_XYZ, PIECE_BODIES, body_kind, piece_scenario
 from sequence import (
     MAX_UNSTACK,
     UnstackFrame,
-    choose_blocker,
-    neighbor_occupancy,
     occupied_squares,
     piece_kind,
     plan_next_unstack,
     probe_approach,
-    promote,
-    rgba_for_home,
-    restore_proxy,
-    stow_idle_free_bodies,
 )
 from squares import bowl_xyz, parse_move, square_to_world
 
 
 def _setup_board(sim, cfg: dict, sc: dict, tid: str, source: str, spawn, surface: float, yaw_deg: float) -> dict:
-    """Hide unused free bodies, hide the target proxy, restore vacated proxies, place the target.
+    """Park unused free bodies off the table, place the target and its neighbours.
 
     A 32-piece board already has every man on its square — leave it alone.
+    On a populated board, pieces sitting on other squares stay put.
     """
     if sim.body_model_pos("pawn_e2") is not None:
         return {}
     keep = {tid}
     for nb in sc.get("neighbors") or []:
         keep.add(nb.get("id", "pawn"))
-    hide_sq = sc.get("hide_proxy")
-    populated = bool(hide_sq)
+    populated = bool(sc.get("populated"))
     occ = occupied_squares(sim, cfg)
     for name in PIECE_BODIES:
         if name in keep:
             continue
         sitting = [sq for sq, body in occ.items() if body == name]
-        if populated and sitting and hide_sq not in sitting:
+        if populated and sitting and source not in sitting:
             continue
         sim.place_object(name, HIDE_XYZ)
-    if hide_sq:
-        sim.hide_body(f"proxy_{hide_sq}")
-    for sq, body in occ.items():
-        if body != tid or sq == source:
-            continue
-        saved = sim.body_model_pos(f"proxy_{sq}")
-        if saved is not None:
-            sim.set_body_pos(f"proxy_{sq}", [float(saved[0]), float(saved[1]), surface])
     sim.place_object(tid, spawn, yaw_quat(yaw_deg))
     neighbor_start = {}
     for nb in sc.get("neighbors") or []:
@@ -86,7 +72,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
     yaw_deg = float(sc.get("yaw_deg", 0.0))
     offset_xy = [float(v) for v in sc.get("offset_xy", [0.0, 0.0])]
     want_lift = sc.get("stop_after") == "lift"
-    populated = bool(sc.get("hide_proxy"))
+    populated = bool(sc.get("populated"))
     reset_board = bool(sc.get("reset_board", True))
 
     if spawn_xy is not None:
@@ -98,8 +84,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
     neighbor_start = {}
     if reset_board:
         neighbor_start = _setup_board(sim, cfg, sc, tid, source, spawn, surface, yaw_deg)
-    else:
-        stow_idle_free_bodies(sim, cfg)
 
     stack: list[UnstackFrame] = []
     unstack_log: list[dict] = []
@@ -130,17 +114,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
         for sq, name in occ.items():
             if name == body:
                 return sq
-        if str(body).startswith("proxy_"):
-            home = body[6:]
-            if occ.get(home) == body:
-                return home
         return None
-
-    def _undo_promote(kind: str, home: str, xyz: list[float], as_proxy: bool) -> None:
-        if as_proxy:
-            restore_proxy(sim, kind, xyz, home)
-        else:
-            sim.place_object(kind, square_to_world(home, cfg, z=surface))
 
     def _execute(kind: str, src: str, dst: str, **extra) -> dict:
         prev_tid = getattr(sim, "target_id", tid)
@@ -209,8 +183,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
                         kind=move.kind,
                         home=move.src,
                         park=move.dst,
-                        proxy_xyz=[],
-                        as_proxy=False,
                         body=sitting or "",
                     )
                 )
@@ -259,14 +231,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
         restack_skipped = "deferred"
         restack_ok = True
         result["parked"] = [
-            {
-                "kind": match.kind,
-                "home": match.home,
-                "park": match.park,
-                "body": match.body,
-                "as_proxy": match.as_proxy,
-                "proxy_xyz": match.proxy_xyz,
-            }
+            {"kind": match.kind, "home": match.home, "park": match.park, "body": match.body}
             for match in stack
         ]
     elif stack:
@@ -290,8 +255,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
                     }
                 )
                 continue
-            if match.as_proxy:
-                restore_proxy(sim, match.kind, match.proxy_xyz, match.home)
             restack_log.append({"kind": match.kind, "home": match.home, "park": match.park, "ok": True})
         sim.target_id = tid
         if not restack_ok and result.get("success") and not want_lift:
@@ -300,7 +263,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
     result["restack"] = restack_log
     result["restack_ok"] = restack_ok
     result["restack_skipped"] = restack_skipped
-    stow_idle_free_bodies(sim, cfg)
 
     if want_lift:
         result["stop_after"] = "lift"
@@ -324,56 +286,9 @@ def occupancy_text(sim, cfg: dict) -> str:
     return "\n".join(rows)
 
 
-def _park_free_kind(sim, cfg: dict, kind: str, src: str) -> None:
-    """One free body per type: park it as a proxy so another piece of that type can move."""
-    occ = occupied_squares(sim, cfg)
-    if occ.get(src) == kind:
-        return
-    old = next((sq for sq, body in occ.items() if body == kind), None)
-    if old is None:
-        return
-    homes = getattr(sim, "_kind_proxy_home", {})
-    home = homes.get(kind, old)
-    if sim.body_model_pos(f"proxy_{home}") is None:
-        return
-    restore_proxy(sim, kind, square_to_world(old, cfg), home)
-
-
 def _restore_capture(sim, cfg: dict, dst: str, snap: dict) -> None:
     """No-op. A failed capture leaves physics as-is."""
     _ = (sim, cfg, dst, snap)
-
-
-def _freeze_loot(sim, body: str) -> dict | None:
-    """Leave a static token in the bowl and free the reusable body."""
-    xyz, quat = sim.object_pose(body)
-    n = int(getattr(sim, "_loot_n", 0))
-    name = f"loot_{n}"
-    kind = body_kind(body) or body
-    if sim.body_model_pos(name) is None:
-        sim.place_object(body, HIDE_XYZ)
-        return None
-    sim.set_body_pos(name, [float(xyz[0]), float(xyz[1]), max(float(xyz[2]), 0.02)])
-    color = sim.body_rgba(body)
-    if color is not None:
-        sim.tint_body(name, color)
-    sim.place_object(body, HIDE_XYZ)
-    homes = getattr(sim, "_kind_proxy_home", {})
-    homes.pop(kind, None)
-    sim._kind_proxy_home = homes
-    sim._loot_n = n + 1
-    return {"type": "loot", "loot": name, "kind": kind, "xyz": xyz.tolist(), "quat": quat.tolist()}
-
-
-def _demote_to_proxy(sim, cfg: dict, kind: str, square: str) -> None:
-    """Park a free body as its home proxy so another piece of that type can use it."""
-    homes = getattr(sim, "_kind_proxy_home", {})
-    home = homes.get(kind, square)
-    if sim.body_model_pos(f"proxy_{home}") is None:
-        return
-    restore_proxy(sim, kind, square_to_world(square, cfg), home)
-    homes.pop(kind, None)
-    sim._kind_proxy_home = homes
 
 
 def discard_square(
@@ -386,74 +301,41 @@ def discard_square(
     if not body:
         return {"success": True, "empty": True, "source": square}
     kind = piece_kind(square, body)
-    homes = getattr(sim, "_kind_proxy_home", {})
-    snap = None
-    promoted = False
-    proxy_xyz = None
-    if str(body).startswith("proxy_"):
-        pos = sim.body_model_pos(body)
-        snap = {
-            "type": "proxy",
-            "body": body,
-            "xyz": None if pos is None else pos.tolist(),
-            "kind": kind,
-            "home": body[6:],
-        }
-        _park_free_kind(sim, cfg, kind, square)
-        proxy_xyz, as_proxy = promote(sim, cfg, square, kind)
-        promoted = as_proxy
-        homes = getattr(sim, "_kind_proxy_home", {})
-        homes[kind] = body[6:]
-        sim._kind_proxy_home = homes
-    elif body:
-        xyz, quat = sim.object_pose(body)
-        snap = {
-            "type": "free",
-            "body": body,
-            "xyz": xyz.tolist(),
-            "quat": quat.tolist(),
-            "kind": kind,
-            "home": homes.get(kind, square),
-        }
-    bowl = bowl_xyz(cfg)
+    xyz, quat = sim.object_pose(body)
+    snap = {"type": "free", "body": body, "xyz": xyz.tolist(), "quat": quat.tolist(), "kind": kind, "home": square}
     sc = piece_scenario(
         kind,
         square,
         square,
         "vision" if use_vision else "gt",
         name=f"discard_{kind}_{square}",
-        hide_proxy=square,
+        populated=True,
         reset_board=False,
         quiet=True,
-        place_xyz=bowl,
+        place_xyz=bowl_xyz(cfg),
         place_target=False,
-        target_id=kind if str(body).startswith("proxy_") else body,
+        target_id=body,
         keep_squares=sorted(keep_squares or ()),
         defer_restack=defer_restack,
     )
     result = run_episode(sim, cfg, use_vision=use_vision, scenario=sc)
-    tid = kind if str(body).startswith("proxy_") else body
     if result.get("success"):
         try:
-            dumped_xyz, _ = sim.object_pose(tid)
+            dumped_xyz, _ = sim.object_pose(body)
         except Exception:
             dumped_xyz = None
         if dumped_xyz is None or not in_trash(dumped_xyz, cfg):
             result["success"] = False
             result["failure_reason"] = result.get("failure_reason") or "PLACEMENT_POSITION_ERROR"
     if not result.get("success"):
-        if promoted and proxy_xyz is not None and snap and snap.get("home"):
-            restore_proxy(sim, kind, snap.get("xyz") or proxy_xyz, snap["home"])
         result["source"] = square
         result["dest"] = "bowl"
         result["piece"] = kind
         result["failure_stage"] = result.get("failure_stage") or "capture"
         return result
-    if str(body).startswith("proxy_") or body in PIECE_BODIES:
-        loot = _freeze_loot(sim, tid)
-        if loot is not None:
-            loot["home"] = (snap or {}).get("home")
-            snap = loot
+    # A bare-name body is the scene's only one of its kind; free it for the next move of that kind.
+    if body in PIECE_BODIES:
+        sim.place_object(body, HIDE_XYZ)
     result["source"] = square
     result["dest"] = "bowl"
     result["piece"] = kind
@@ -498,8 +380,6 @@ def restack_parked(sim, cfg: dict, frames: list[dict]) -> dict:
         if not moved.get("success"):
             ok = False
             entry["reason"] = moved.get("failure_reason")
-        elif frame.get("as_proxy"):
-            restore_proxy(sim, kind, frame.get("proxy_xyz") or [], frame["home"])
         log.append(entry)
     return {"ok": ok, "restack": log}
 
@@ -541,10 +421,6 @@ def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
     capture_snap = None
     if dst in occ:
         captured = piece_kind(dst, occ[dst])
-        if occ.get(src) == captured:
-            _demote_to_proxy(sim, cfg, captured, src)
-            occ = occupied_squares(sim, cfg)
-            body = occ.get(src, body)
         dumped = discard_square(
             sim, cfg, dst, use_vision=use_vision, keep_squares={src}, defer_restack=True
         )
@@ -567,22 +443,16 @@ def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
         kind = piece_kind(src, body) if src in occ else kind
     else:
         parked = []
-    if str(body).startswith("proxy_"):
-        _park_free_kind(sim, cfg, kind, src)
-        promote(sim, cfg, src, kind)
-        homes = getattr(sim, "_kind_proxy_home", {})
-        homes[kind] = body[6:] if str(body).startswith("proxy_") else src
-        sim._kind_proxy_home = homes
     sc = piece_scenario(
         kind,
         src,
         dst,
         "vision" if use_vision else "gt",
         name=f"play_{kind}_{src}_{dst}",
-        hide_proxy=src,
+        populated=True,
         reset_board=False,
         quiet=True,
-        target_id=kind if str(body).startswith("proxy_") else body,
+        target_id=body,
     )
     result = run_episode(sim, cfg, use_vision=use_vision, scenario=sc)
     if parked:

@@ -37,7 +37,6 @@ from fast import clock_scale
 from mj import DEBUG_DIR, Sim, load_config
 from pickup import FULL_BOARD_XML, seed_vertical
 from robot import WALLS, open_robot, world_of
-from sequence import stow_idle_free_bodies
 
 _GAMES = {
     "opera": """\
@@ -221,7 +220,6 @@ def main() -> int:
     cfg = load_config()
     sim = open_robot(Sim(xml_path=FULL_BOARD_XML, cfg=cfg), args.wall)
     sim.quiet = True
-    stow_idle_free_bodies(sim, cfg)
     seed_vertical(sim, cfg)
 
     viewer = None
