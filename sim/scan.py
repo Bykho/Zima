@@ -241,7 +241,7 @@ def _fuse_brightness(hm: scene.HeightMap, acc: np.ndarray, cnt: np.ndarray, pts:
     np.add.at(cnt, (i[m], j[m]), 1)
 
 
-def scan_board(sim, cfg: dict, duration: float = 0.6, physics: bool = False) -> Scan:
+def scan_board(sim, cfg: dict, duration: float = 0.6, physics: bool = True) -> Scan:
     """Visit scan poses, fuse depth and brightness. Caller raises the arm first."""
     from ik import move_qpos
 
