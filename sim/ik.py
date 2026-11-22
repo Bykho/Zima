@@ -20,9 +20,6 @@ DOWN = np.array([0.0, 0.0, -1.0])
 # same IK family; many waypoints accumulate a full straighten.
 CARRY_ORI_WEIGHT = 0.12
 CARRY_FLEX_STEP = 0.20
-# Grasp/observe: several flex steps in one solve so the jaws are already
-# world-down before the pinch. Carry stays at 1 step per waypoint.
-APPROACH_ORI_STEPS = 8
 # Unreachable targets plateau at the workspace boundary; stop iterating once
 # the residual has not improved by 0.01 mm for this many iterations.
 _STALL_EPS = 1e-5

@@ -1365,7 +1365,6 @@ def open_gripper(sim: Sim, opened: float, steps: int = 80):
 
 
 _PAD_CLEAR_M = 0.01
-_PAD_CLEAR_GAP = 0.004
 
 
 def _fixed_pad_clear(sim: Sim, piece_xy, dist: float = _PAD_CLEAR_M):

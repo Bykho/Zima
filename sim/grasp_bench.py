@@ -24,7 +24,6 @@ from harness import run_guarded  # noqa: E402
 
 OUT = ROOT / "sim" / "debug" / "grasp_bench"
 BODIES = {"pawn": "pawn_e2", "rook": "rook_h1", "knight": "knight_g1", "bishop": "bishop_c1", "queen": "queen_d1", "king": "king_e1"}
-HELD_TILT_DEG = 15.0
 
 
 def run_one(args: tuple[str, float, float | None, str, float | None, str]) -> dict:

@@ -22,7 +22,6 @@ from rgbd import unproject
 from sensor import D405_FAR, DEFAULT_CAMERA, _mujoco_cv_extrinsics, capture
 from squares import FILES, square_to_world
 
-ARM_SCAN_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex")
 ROBOT_BODIES = ("upper_arm", "lower_arm", "wrist", "gripper", "moving_jaw_so101_v1", "camera_mount")
 SCAN_CLEAR_M = 0.07  # robot geoms over the board stay above this (tallest man 55 mm)
 VIEW_MIN_M = 0.12  # square center at least this far from the lens (55 mm tops stay past the 70 mm near clip)

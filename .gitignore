@@ -4,3 +4,10 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# generated output
+/sim/debug/*
+!/sim/debug/*.py
+/sim/frames/
+/MUJOCO_LOG.TXT
+/runs/

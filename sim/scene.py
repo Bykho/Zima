@@ -16,7 +16,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from rgbd import RgbdObservation, unproject
 from squares import FILES
 
 CELL_M = 0.0015
@@ -100,11 +99,6 @@ def empty_heightmap(cfg: dict, cell: float = CELL_M, margin: float = MARGIN_M) -
         height=np.full((int(n[0]), int(n[1])), np.nan),
         hits=np.zeros((int(n[0]), int(n[1])), dtype=np.int32),
     )
-
-
-def integrate(hm: HeightMap, obs: RgbdObservation) -> int:
-    """Max-fuse one view into the map. Returns points used."""
-    return integrate_points(hm, unproject(obs))
 
 
 def integrate_points(hm: HeightMap, pts: np.ndarray) -> int:

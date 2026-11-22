@@ -49,10 +49,6 @@ def clock_scale() -> float:
     return _DEFAULT_CLOCK
 
 
-# Kept so callers that still read a duration scale get 1.0 (clock handles speed).
-_MIN_SCALE = 1.0
-
-
 def motion_scale() -> float:
     """Move duration scale. Always 1 in clock mode so paths stay physically the same."""
     return 1.0

@@ -335,7 +335,6 @@ STARTING_POSITION = (
     ("rook", "h8"),
 )
 STARTING_AT = {sq: kind for kind, sq in STARTING_POSITION}
-STARTING_BODIES = tuple(f"{kind}_{sq}" for kind, sq in STARTING_POSITION)
 
 
 def starting_body(kind: str, square: str) -> str:

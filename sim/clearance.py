@@ -16,8 +16,6 @@ from squares import parse_square, shift_square, square_to_world
 
 JAW_BODIES = ("gripper", "moving_jaw_so101_v1")
 CAMERA_BODIES = ("camera_mount",)
-_MARGIN = 0.002
-_GRIPPER_SAMPLES = 12
 
 
 def neighbor_squares(source: str) -> list[str]:
@@ -913,7 +911,6 @@ def plan_approach(
     lock_roll: bool = False,
     grasp_for_roll=None,
     target: str | None = None,
-    exclude: list[dict] | None = None,
     margin: float | None = None,
 ) -> dict:
     """First collision-free reachable approach around the frozen grasp XY.
@@ -1063,25 +1060,7 @@ def plan_approach(
             grasp_cache[key] = np.asarray(grasp_for_roll(roll), dtype=float)
         return grasp_cache[key]
 
-    def _excluded(roll, gripper, dx, dy) -> bool:
-        for ex in exclude or ():
-            er = ex.get("roll")
-            same_roll = (er is None and roll is None) or (
-                er is not None and roll is not None and abs(float(er) - float(roll)) < 0.05
-            )
-            off = ex.get("pre_offset_xy") or [0.0, 0.0]
-            if (
-                same_roll
-                and abs(float(ex.get("gripper", -1.0)) - float(gripper)) < 0.03
-                and abs(float(off[0]) - dx) < 1e-3
-                and abs(float(off[1]) - dy) < 1e-3
-            ):
-                return True
-        return False
-
     for dx, dy, crank, roll, gripper in ordered:
-        if _excluded(roll, gripper, dx, dy):
-            continue
         tried += 1
         restore()
         pre_i = pre_at(dx, dy)

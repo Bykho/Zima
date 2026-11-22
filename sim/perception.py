@@ -79,11 +79,6 @@ def estimate_target_pose(obs: RgbdObservation, cfg: dict, square: str) -> np.nda
     return np.array([xy[0], xy[1], surface], dtype=np.float64)
 
 
-def estimate_queen_pose(obs: RgbdObservation, cfg: dict, square: str = "d1") -> np.ndarray | None:
-    """Alias used by existing tests; same estimator."""
-    return estimate_target_pose(obs, cfg, square)
-
-
 _TOP_CEIL = 0.075
 _TOP_PCT = 95.0
 
