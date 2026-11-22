@@ -117,6 +117,7 @@ def _restore(sim: Sim, cfg: dict, snap: dict) -> None:
     sim.data.ctrl[:] = snap["ctrl"]
     sim.model.body_pos[:] = snap["body_pos"]
     mujoco.mj_forward(sim.model, sim.data)
+    sim.mark_scene_reset()
     seed_vertical(sim, cfg)
 
 

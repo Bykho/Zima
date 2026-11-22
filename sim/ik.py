@@ -7,6 +7,8 @@ override reaching the point. Rotation about the approach axis is free.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import numpy as np
 
 from fast import enabled as fast_enabled, motion_scale
@@ -320,17 +322,18 @@ def pose_reaches(
     upright: bool = False,
     **ik_kwargs,
 ) -> bool:
-    """True if IK can put the EE within `max_err` of `target`. Restores qpos."""
+    """True if IK can put the EE within `max_err` of `target`. Restores qpos (restore=False: caller's probe)."""
     snap = sim.qpos() if restore else None
     tgt = np.asarray(target, dtype=float)
-    try:
-        fn = solve_ik_upright if upright else solve_ik
-        ok = bool(fn(sim, tgt, lock_joints=lock_joints, **ik_kwargs))
-        pos, _ = sim.site_pose(EE_SITE)
-        return bool(ok and float(np.linalg.norm(pos - tgt)) <= float(max_err))
-    finally:
-        if snap is not None:
-            sim.set_qpos(snap, hold=True)
+    with sim.probe() if restore else nullcontext():
+        try:
+            fn = solve_ik_upright if upright else solve_ik
+            ok = bool(fn(sim, tgt, lock_joints=lock_joints, **ik_kwargs))
+            pos, _ = sim.site_pose(EE_SITE)
+            return bool(ok and float(np.linalg.norm(pos - tgt)) <= float(max_err))
+        finally:
+            if snap is not None:
+                sim.set_qpos(snap, hold=True)
 
 
 def reachable_approaches(
@@ -351,6 +354,13 @@ def reachable_approaches(
     while the pinch itself is fine. Callers list high/far poses first so the
     first hit is the safest reachable approach, not a scrape. Restores qpos.
     """
+    with sim.probe():
+        return _reachable_approaches(
+            sim, candidates, goal, lock_joints, max_err, reset, accept, upright, ik_kwargs
+        )
+
+
+def _reachable_approaches(sim, candidates, goal, lock_joints, max_err, reset, accept, upright, ik_kwargs):
     snap = sim.qpos()
     hits: list[list[float]] = []
     try:
@@ -539,14 +549,18 @@ def servo_lin(
         wps[-1] = goal.copy()
     for i, wp in enumerate(wps):
         arm = sim.qpos()
-        if not solve_ik(sim, wp, **track_kw):
-            track_kw["max_iters"] = 80
-            if not solve_ik(sim, wp, **track_kw):
+        with sim.probe():
+            solved = solve_ik(sim, wp, **track_kw)
+            if not solved:
+                track_kw["max_iters"] = 80
+                solved = solve_ik(sim, wp, **track_kw)
+            if not solved:
                 sim.set_qpos(arm, hold=True)
                 _store_ik_fail(sim, target_pos, extra={"servo_wp": f"{i + 1}/{len(wps)}"})
-                return False
-        cmd = sim.qpos()
-        sim.set_qpos(arm, hold=False)
+            cmd = sim.qpos()
+            sim.set_qpos(arm, hold=False)
+        if not solved:
+            return False
         sim.set_ctrl(cmd)
         sim.step()
     sim.hold(sim.qpos())
@@ -592,17 +606,18 @@ def move_ik(
     # returns False with sim._last_abort set to the returned value.
     guard = ik_kwargs.pop("guard", None)
     x_axis = ik_kwargs.pop("x_axis", None)
-    if down:
-        lock = tuple(ik_kwargs.get("lock_joints", ()))
-        solved = solve_ik_down(sim, target_pos, lock_joints=lock, x_axis=x_axis)
-    else:
-        solved = solve_ik(sim, target_pos, **ik_kwargs)
-    if not solved:
-        _store_ik_fail(sim, target_pos)
+    with sim.probe():
+        if down:
+            lock = tuple(ik_kwargs.get("lock_joints", ()))
+            solved = solve_ik_down(sim, target_pos, lock_joints=lock, x_axis=x_axis)
+        else:
+            solved = solve_ik(sim, target_pos, **ik_kwargs)
+        if not solved:
+            _store_ik_fail(sim, target_pos)
+        goal = sim.qpos()
         sim.set_qpos(start, hold=True)
+    if not solved:
         return False
-    goal = sim.qpos()
-    sim.set_qpos(start, hold=True)
     n = _interp_n(sim, duration)
     for i in range(n):
         u = (i + 1) / n

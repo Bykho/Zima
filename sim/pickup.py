@@ -37,7 +37,7 @@ from ik import (
     solve_ik,
     solve_ik_down,
 )
-from mj import ARM_JOINTS, DEBUG_DIR, JOINT_NAMES, Sim, load_config
+from mj import ARM_JOINTS, DEBUG_DIR, JOINT_NAMES, Sim, load_config, probing
 from clearance import (
     APPROACH_BODIES,
     HARD_MARGIN,
@@ -267,6 +267,7 @@ def seed_vertical(sim: Sim, cfg: dict):
     _clear_to_seed(sim, cfg, seed)
 
 
+@probing
 def _seed_ee_xyz(sim: Sim, cfg: dict):
     snap = sim.qpos()
     try:
@@ -291,6 +292,7 @@ def _transit_z(sim: Sim, cfg: dict, skip=None) -> float:
     )
 
 
+@probing
 def _chain_ik_ok(
     sim: Sim,
     wps,
@@ -432,6 +434,7 @@ def _reset_ik_seed(sim: Sim, cfg: dict, keep: dict | None = None):
     sim.set_qpos(seed, hold=True)
 
 
+@probing
 def _vertical_wrist(sim: Sim, target) -> dict | None:
     """wrist_flex that makes gripper +X world-down at target (roll untouched).
 
@@ -450,6 +453,7 @@ def _vertical_wrist(sim: Sim, target) -> dict | None:
         sim.set_qpos(snap, hold=True)
 
 
+@probing
 def _pitch_path(sim: Sim, flex_goal: float, n: int) -> list[dict]:
     """Arm waypoints that pitch wrist_flex to `flex_goal` with the EE held put (planned, not executed)."""
     keep, _ = sim.site_pose(EE_SITE)
@@ -547,18 +551,19 @@ def _level_pinch_axis(sim: Sim) -> float:
     phi0 = float(np.arctan2(z_z, float(R[2, 1])))
     best = None
     ctrl0 = sim.data.ctrl.copy()
-    try:
-        for phi in (phi0, -phi0, phi0 + np.pi, phi0 - np.pi, -phi0 + np.pi, -phi0 - np.pi):
-            cand = float(np.clip(cur + phi, lo, hi))
-            sim.set_qpos({"wrist_roll": cand}, hold=False)
-            _, Rc = sim.site_pose(EE_SITE)
-            if abs(float(Rc[2, 2])) > np.sin(np.radians(_LEVEL_PINCH_MIN_DEG)):
-                continue
-            if best is None or abs(cand - cur) < abs(best - cur):
-                best = cand
-    finally:
-        sim.set_qpos({"wrist_roll": cur}, hold=False)
-        sim.data.ctrl[:] = ctrl0
+    with sim.probe():
+        try:
+            for phi in (phi0, -phi0, phi0 + np.pi, phi0 - np.pi, -phi0 + np.pi, -phi0 - np.pi):
+                cand = float(np.clip(cur + phi, lo, hi))
+                sim.set_qpos({"wrist_roll": cand}, hold=False)
+                _, Rc = sim.site_pose(EE_SITE)
+                if abs(float(Rc[2, 2])) > np.sin(np.radians(_LEVEL_PINCH_MIN_DEG)):
+                    continue
+                if best is None or abs(cand - cur) < abs(best - cur):
+                    best = cand
+        finally:
+            sim.set_qpos({"wrist_roll": cur}, hold=False)
+            sim.data.ctrl[:] = ctrl0
     if best is None or abs(best - cur) < 1e-3:
         return 0.0
     _roll_holding(sim, best)
@@ -582,6 +587,7 @@ def _roll_holding(sim: Sim, target_roll: float) -> None:
 _PLACE_MARGIN_M = 0.003
 
 
+@probing
 def _plan_place(
     sim: Sim, tid: str, dest_xy, place_z: float, hold: tuple[str, ...], release_open: float, margin: float = _PLACE_MARGIN_M, x_axis=None
 ) -> dict:
@@ -663,6 +669,7 @@ def _pinch_shift_m(sim: Sim, geom: dict | None) -> float:
     return abs(cache) - _PAD_RADIUS_M - stem_r - clear
 
 
+@probing
 def _grasp_xy_for_roll(sim: Sim, piece_xy, z: float, geom: dict | None, roll: float | None) -> list[float]:
     """Grasp EE XY for a vertical pinch at the given wrist roll (None = current).
 
@@ -774,6 +781,7 @@ def _carry_lin(
     )
 
 
+@probing
 def _place_ee_target(
     sim: Sim, tid: str, dest_xy, z_ee: float, lock: tuple[str, ...], p_local=None, x_axis=None
 ) -> list[float] | None:
@@ -926,9 +934,10 @@ def _plumb_transport(
         result["plumb"] = {"no_carry": getattr(sim, "plumb_fail", None)}
         return None
     snap = sim.qpos()
-    sim.set_qpos(over[-1], hold=True)
-    down = plumb.plan(sim, [(above, loose), (place, plumb.PLACE_TILT_DEG)], v_local, avoid, gap=0.002)
-    sim.set_qpos({n: snap[n] for n in ARM_JOINTS}, hold=True)
+    with sim.probe():
+        sim.set_qpos(over[-1], hold=True)
+        down = plumb.plan(sim, [(above, loose), (place, plumb.PLACE_TILT_DEG)], v_local, avoid, gap=0.002)
+        sim.set_qpos({n: snap[n] for n in ARM_JOINTS}, hold=True)
     if down is None:
         result["plumb"] = {"no_lower": getattr(sim, "plumb_fail", None)}
         return None
@@ -1200,20 +1209,21 @@ def _descend_column(sim: Sim, grasp, lock: tuple[str, ...]) -> list[dict] | None
     nothing moved.
     """
     snap = sim.qpos()
-    try:
-        if not solve_ik_down(sim, grasp, lock_joints=lock):
-            return None
-        _, R = sim.site_pose(EE_SITE)
-        v_local = np.asarray(R, dtype=float).reshape(3, 3).T @ plumb.UP
-        sim.set_qpos(snap, hold=True)
-        gpos, _ = sim.site_pose(EE_SITE)
-        above = [float(grasp[0]), float(grasp[1]), float(gpos[2])]
-        if not plumb.solve_plumb(sim, above, v_local, _COLUMN_TILT_DEG):
-            return None
-        q_above = {n: float(sim.qpos()[n]) for n in ARM_JOINTS}
-        down = plumb.plan(sim, [(grasp, _COLUMN_TILT_DEG)], v_local, [])
-    finally:
-        sim.set_qpos(snap, hold=True)
+    with sim.probe():
+        try:
+            if not solve_ik_down(sim, grasp, lock_joints=lock):
+                return None
+            _, R = sim.site_pose(EE_SITE)
+            v_local = np.asarray(R, dtype=float).reshape(3, 3).T @ plumb.UP
+            sim.set_qpos(snap, hold=True)
+            gpos, _ = sim.site_pose(EE_SITE)
+            above = [float(grasp[0]), float(grasp[1]), float(gpos[2])]
+            if not plumb.solve_plumb(sim, above, v_local, _COLUMN_TILT_DEG):
+                return None
+            q_above = {n: float(sim.qpos()[n]) for n in ARM_JOINTS}
+            down = plumb.plan(sim, [(grasp, _COLUMN_TILT_DEG)], v_local, [])
+        finally:
+            sim.set_qpos(snap, hold=True)
     if down is None:
         return None
     _follow_q_path(sim, [q_above], 0.6)
@@ -1281,22 +1291,23 @@ def physical_descend(sim: Sim, target, duration: float = 1.2, lock_joints=(), pa
         "samples": [],
         "ee_requested": _xyz(target_ee),
     }
-    if not solve_ik_down(sim, target, lock_joints=lock_joints):
+    with sim.probe():
+        solved = solve_ik_down(sim, target, lock_joints=lock_joints)
         pos, _ = sim.site_pose(EE_SITE)
-        report["ee_actual"] = _xyz(pos)
-        report["ee_err_mm"] = float(np.linalg.norm(pos - target_ee)) * 1000
-        report["ik_residual_mm"] = report["ee_err_mm"]
         report["joint_limit_margin_rad"] = joint_limit_margin(sim)
+        if not solved:
+            report["ee_actual"] = _xyz(pos)
+            report["ee_err_mm"] = float(np.linalg.norm(pos - target_ee)) * 1000
+            report["ik_residual_mm"] = report["ee_err_mm"]
+        else:
+            goal = sim.qpos()
+            report["ik_solved"] = True
+            report["tilt_deg"] = gripper_tilt_deg(sim)
+            report["ik_residual_mm"] = float(np.linalg.norm(pos - target_ee)) * 1000
+            report["ik_jaw"] = jaw_snapshot(sim, tid)
         sim.set_qpos(start, hold=True)
+    if not solved:
         return report
-    goal = sim.qpos()
-    report["ik_solved"] = True
-    report["tilt_deg"] = gripper_tilt_deg(sim)
-    pos, _ = sim.site_pose(EE_SITE)
-    report["ik_residual_mm"] = float(np.linalg.norm(pos - target_ee)) * 1000
-    report["joint_limit_margin_rad"] = joint_limit_margin(sim)
-    report["ik_jaw"] = jaw_snapshot(sim, tid)
-    sim.set_qpos(start, hold=True)
     n = max(30, int(duration / sim.dt))
     peak = np.zeros(len(JOINT_NAMES))
     for i in range(n):
@@ -1649,6 +1660,7 @@ def _jaw_zmin(sim: Sim) -> float:
     return float(zmin)
 
 
+@probing
 def _choose_scoop_axis(sim: Sim, com, stem_xy) -> np.ndarray:
     """Approach along ±stem (with a downward dip) — pick the reachable end."""
     snap = sim.qpos()
@@ -1686,6 +1698,7 @@ def _pinch_xyz_base(sim: Sim, tid: str, surface: float) -> np.ndarray:
     return np.array([float(xy[0]), float(xy[1]), z], dtype=float)
 
 
+@probing
 def _roll_horizontal_pinch(sim: Sim, com, axis) -> float:
     """wrist_roll so jaws open sideways and wrap the stem above the board."""
     start = sim.qpos()
@@ -1730,6 +1743,7 @@ def _close_hold(sim: Sim, closed: float, steps: int = 220, hold=None) -> None:
     sim.step(12)
 
 
+@probing
 def _ik_goal(
     sim: Sim,
     target,
@@ -1976,7 +1990,8 @@ def _recover_descend(
         )
         for high in hits:
             last_high = high
-            _reset()
+            with sim.probe():
+                _reset()
             if not move_lin(sim, high, duration=0.9, physics=True, n_wp=6, lock_joints=lock_r, **ikw):
                 continue
             log_state(sim, "recover_pregrasp", extra={"target": _xyz(high), "pinch": _xyz(pinch)})

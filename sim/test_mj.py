@@ -49,8 +49,7 @@ def test_joints_move():
     }
     for name, target in targets.items():
         start = {n: 0.0 for n in JOINT_NAMES}
-        sim.set_qpos(start)
-        sim.hold(start)
+        sim.pose_arm_for_setup(start)
         cmd = {**start, name: target}
         sim.set_ctrl(cmd)
         for _ in range(80):
@@ -91,6 +90,15 @@ def test_arm_base_applied():
     sim.close()
     ok = abs(moved[0] - origin[0] - 0.08) < 1e-9 and abs(restored[0] - origin[0]) < 1e-9
     return check("arm base position", ok, f"origin={origin[:2]} moved={moved[:2]}")
+
+
+def _pose_by_ik(sim, target, **kw) -> bool:
+    """Test setup: start the arm at an IK pose (placed before the episode, not moved there)."""
+    with sim.probe():
+        ok = solve_ik(sim, target, **kw)
+        q = sim.qpos()
+    sim.pose_arm_for_setup(q)
+    return ok
 
 
 def test_ik_above_d1():
@@ -214,7 +222,7 @@ def test_unstack_policy():
 
 def test_home_clears_pieces():
     import numpy as np
-    from ik import EE_SITE, solve_ik
+    from ik import EE_SITE
     from pickup import FULL_BOARD_XML, queen_upright, seed_vertical
     from squares import bowl_xyz
 
@@ -223,7 +231,7 @@ def test_home_clears_pieces():
     seed_vertical(sim, cfg)
     q0, _ = sim.object_pose("queen_d1")
     b = bowl_xyz(cfg)
-    ok_ik = solve_ik(sim, [b[0], b[1], 0.04])
+    ok_ik = _pose_by_ik(sim, [b[0], b[1], 0.04])
     sim.hold(sim.qpos())
     for _ in range(16):
         sim.step()
@@ -306,7 +314,7 @@ def test_reachable_approach_near_base():
 
 def test_column_descend_tracks_xy():
     import numpy as np
-    from ik import EE_SITE, servo_lin, solve_ik
+    from ik import EE_SITE, servo_lin
     from pickup import seed_vertical
 
     cfg = load_config()
@@ -315,7 +323,7 @@ def test_column_descend_tracks_xy():
     xy = square_to_world("d4", cfg)
     high = [xy[0], xy[1], 0.12]
     low = [xy[0], xy[1], 0.05]
-    ok_ik = solve_ik(sim, high, lock_joints=("wrist_flex",))
+    ok_ik = _pose_by_ik(sim, high, lock_joints=("wrist_flex",))
     drift = [0.0]
     z0 = [None]
     prev = sim.on_step

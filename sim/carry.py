@@ -25,6 +25,7 @@ import numpy as np
 
 from clearance import neighbor_approach_gap
 from ik import ARM_JOINTS, EE_SITE, solve_ik_down
+from mj import probing
 from robot import PAD_GEOMS
 
 UP = np.array([0.0, 0.0, 1.0])
@@ -67,6 +68,7 @@ def solve_plumb(sim, ee_target, v_local, tilt_max: float = PLACE_TILT_DEG) -> bo
     return _tilt_deg(sim, v_local) <= tilt_max
 
 
+@probing
 def ee_for_piece(sim, piece_xyz, v_local, p_local) -> np.ndarray | None:
     """EE point that puts the held piece origin at piece_xyz, gripper plumb. Restores qpos."""
     snap = sim.qpos()
@@ -120,6 +122,7 @@ def _bridge(sim, a, b, prev: dict, v_local, tilt_max: float, where: dict, depth:
     return None if second is None else first + second
 
 
+@probing
 def plan(sim, points, v_local, avoid: list[str], gap: float = PLUMB_GAP_M) -> list[dict] | None:
     """Joint chain along straight EE segments through `points`, or None. Restores qpos.
 

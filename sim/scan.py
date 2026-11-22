@@ -18,6 +18,7 @@ import mujoco
 import numpy as np
 
 import scene
+from mj import probing
 from rgbd import unproject
 from sensor import D405_FAR, DEFAULT_CAMERA, _mujoco_cv_extrinsics, capture
 from squares import FILES, square_to_world
@@ -71,6 +72,7 @@ def _board_box(cfg: dict, margin: float = 0.03) -> tuple[np.ndarray, np.ndarray]
     return lo, hi
 
 
+@probing
 def plan_scan_poses(sim, cfg: dict, camera: str = DEFAULT_CAMERA) -> list[dict[str, float]]:
     """Greedy set of arm poses whose wrist views cover every square COVER_TARGET times."""
     surface = scene._board(cfg)[3]
@@ -125,6 +127,7 @@ def _clear(sim, geoms, lo, hi, surface) -> bool:
     return not (np.any(over & (c[..., 2] < surface + SCAN_CLEAR_M)) or np.any(c[..., 2] < surface + 0.01))
 
 
+@probing
 def transit_clear(sim, cfg: dict, a: dict, b: dict) -> bool:
     """Joint-space line a→b keeps every robot geom above the pieces."""
     geoms = _robot_geoms(sim)

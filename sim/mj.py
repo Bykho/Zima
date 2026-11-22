@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+from contextlib import contextmanager
 from pathlib import Path
 
 import mujoco
@@ -19,6 +21,17 @@ JOINT_NAMES = [
 ]
 ARM_JOINTS = JOINT_NAMES[:-1]
 DEBUG_DIR = ROOT / "sim" / "debug"
+
+
+def probing(fn):
+    """Run `fn(sim, ...)` inside sim.probe(): a pure planning query that never moves the physics arm."""
+
+    @functools.wraps(fn)
+    def wrapper(sim, *args, **kwargs):
+        with sim.probe():
+            return fn(sim, *args, **kwargs)
+
+    return wrapper
 
 
 def load_config() -> dict:
@@ -47,6 +60,11 @@ class Sim:
         self._depth_renderer: mujoco.Renderer | None = None
         self.on_step = None
         self.quiet = False
+        self._live: mujoco.MjData | None = None
+        self._scratch: mujoco.MjData | None = None
+        self._probe_depth = 0
+        self._arm_adr_all = np.array([self.model.jnt_qposadr[self._joint[n]] for n in JOINT_NAMES], dtype=int)
+        self._arm_after_step: np.ndarray | None = None
         self.apply_arm_base()
         self.apply_board_layout()
         mujoco.mj_resetData(self.model, self.data)
@@ -110,6 +128,56 @@ class Sim:
         mujoco.mj_forward(self.model, self.data)
         self._place_starting_men()
         self.on_step = None
+        self._arm_after_step = None
+
+    def pose_arm_for_setup(self, positions: dict[str, float]) -> None:
+        """Scene setup only (tests, saved boards): place the arm before the episode runs."""
+        self.set_qpos(positions, hold=True)
+        self._arm_after_step = None
+
+    def mark_scene_reset(self) -> None:
+        """The whole state was rewound (reset/undo), arm included; not an arm move."""
+        self._arm_after_step = None
+
+    @contextmanager
+    def probe(self):
+        """Kinematic what-ifs (IK, reach, clearance) on a scratch copy of the state.
+
+        Joint writes inside never reach the physics state; actuator commands set
+        inside are kept, as a servo command would be. Stepping inside raises.
+        """
+        if self._probe_depth:
+            self._probe_depth += 1
+            try:
+                yield
+            finally:
+                self._probe_depth -= 1
+            return
+        live = self.data
+        if self._scratch is None:
+            self._scratch = mujoco.MjData(self.model)
+        scratch = self._scratch
+        mujoco.mj_copyData(scratch, self.model, live)
+        self._live = live
+        self.data = scratch
+        self._probe_depth = 1
+        try:
+            yield
+        finally:
+            live.ctrl[:] = scratch.ctrl
+            self.data = live
+            self._live = None
+            self._probe_depth = 0
+
+    def _check_no_teleport(self) -> None:
+        if self._probe_depth:
+            raise RuntimeError("Sim.step inside probe(): probes are kinematic only")
+        if self._arm_after_step is None:
+            return
+        now = self.data.qpos[self._arm_adr_all]
+        if not np.array_equal(now, self._arm_after_step):
+            moved = {n: round(float(a - b), 5) for n, a, b in zip(JOINT_NAMES, now, self._arm_after_step) if a != b}
+            raise RuntimeError(f"arm joints written outside physics (teleport): {moved}")
 
     def joint_limits(self) -> dict[str, tuple[float, float]]:
         out = {}
@@ -148,18 +216,22 @@ class Sim:
         return np.asarray(self.data.actuator_force, dtype=float).copy()
 
     def step(self, n: int = 1):
+        self._check_no_teleport()
         n = max(1, int(n))
         if n == 1 or self.on_step is not None:
             for _ in range(n):
                 mujoco.mj_step(self.model, self.data)
+                self._arm_after_step = self.data.qpos[self._arm_adr_all].copy()
                 if self.on_step is not None:
                     self.on_step()
+                    self._check_no_teleport()
             return
         try:
             mujoco.mj_step(self.model, self.data, nstep=n)
         except TypeError:
             for _ in range(n):
                 mujoco.mj_step(self.model, self.data)
+        self._arm_after_step = self.data.qpos[self._arm_adr_all].copy()
 
     def site_pose(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, name)

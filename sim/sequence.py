@@ -12,6 +12,7 @@ import numpy as np
 
 from clearance import neighbor_squares, obstacle_bodies, plan_approach
 from ik import EE_SITE, grasp_xy_delta, solve_ik
+from mj import probing
 from scenario import HIDE_XYZ, PIECES, STARTING_AT, body_kind, is_piece_body
 from squares import FILES, parse_square, square_to_world
 
@@ -282,6 +283,7 @@ def restore_proxy(sim, kind: str, proxy_xyz: list[float], home: str) -> None:
     sim.set_body_pos(f"proxy_{home}", proxy_xyz)
 
 
+@probing
 def probe_approach(
     sim, cfg: dict, source: str, tid: str, scenario: dict, at=None,
     require_extract: bool = True, force_roll: float | None = None, lock_roll: bool = False,

@@ -13,6 +13,8 @@ One flag opens the wall for reference runs:
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import mujoco
 import numpy as np
 
@@ -133,6 +135,10 @@ class Robot(Sim):
         """Pose the belief arm (a planning probe). With hold, the servo targets follow on the next step."""
         super().set_qpos(positions, hold=hold)
         self._posed = True
+
+    def probe(self):
+        """The belief is already a scratch copy of the world; probes write it directly."""
+        return nullcontext()
 
     def actuator_forces(self) -> np.ndarray:
         return self._world.actuator_forces()

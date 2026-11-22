@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from ik import solve_ik, solve_ik_down, solve_ik_upright
+from mj import probing
 from scenario import body_kind
 from squares import parse_square, shift_square, square_to_world
 
@@ -563,6 +564,7 @@ def _pose_for_candidate(
 _LEVEL_PADS_TILT_DEG = 3.0
 
 
+@probing
 def _grasp_tilt_deg(sim, grasp, roll: float) -> float:
     """Gripper +X tilt from world-down at the grasp with `roll` locked (0 if unreachable)."""
     q = sim.qpos()
@@ -574,6 +576,7 @@ def _grasp_tilt_deg(sim, grasp, roll: float) -> float:
     return float(np.degrees(np.arccos(np.clip(-R[2, 0], -1.0, 1.0))))
 
 
+@probing
 def _level_pads_roll(sim, grasp, base_roll: float) -> float:
     """Roll that puts the pinch axis horizontal when a vertical pinch is out of reach.
 
@@ -753,6 +756,7 @@ _CLOSE_SWEEP_STEP = 0.06
 _CLOSE_SWEEP_OVERSHOOT_M = 0.006
 
 
+@probing
 def _close_sweep_gap(sim, open_g: float, neighbors: list[str], tgt: list[str]) -> float:
     """Min bystander gap while the moving jaw closes from open_g onto the target.
 
@@ -782,6 +786,7 @@ def _close_sweep_gap(sim, open_g: float, neighbors: list[str], tgt: list[str]) -
     return float(worst)
 
 
+@probing
 def _candidate_clear(
     sim,
     pre,
@@ -897,6 +902,7 @@ def _candidate_clear(
     return last, used_lock
 
 
+@probing
 def plan_approach(
     sim,
     pre,
@@ -1166,6 +1172,7 @@ def plan_approach(
     }
 
 
+@probing
 def verify_approach(
     sim,
     pre,
