@@ -503,6 +503,7 @@ def servo_lin(
     goal XY and only moves Z (after a level XY align if needed).
     """
     start, _ = sim.site_pose(EE_SITE)
+    _no_kinematic(physics)
     goal = np.asarray(target_pos, dtype=np.float64)
     if ref is None:
         ref = goal
@@ -545,19 +546,13 @@ def servo_lin(
                 _store_ik_fail(sim, target_pos, extra={"servo_wp": f"{i + 1}/{len(wps)}"})
                 return False
         cmd = sim.qpos()
-        if physics:
-            sim.set_qpos(arm, hold=False)
-            sim.set_ctrl(cmd)
-        else:
-            sim.set_qpos(cmd, hold=True)
+        sim.set_qpos(arm, hold=False)
+        sim.set_ctrl(cmd)
         sim.step()
-        if not physics:
-            sim.set_qpos(cmd, hold=True)
-    if physics:
-        sim.hold(sim.qpos())
-        extra = (4 if fast_enabled() else 12) if settle is None else max(0, int(settle))
-        if extra:
-            sim.step(extra)
+    sim.hold(sim.qpos())
+    extra = (4 if fast_enabled() else 12) if settle is None else max(0, int(settle))
+    if extra:
+        sim.step(extra)
     pos, _ = sim.site_pose(EE_SITE)
     ok = float(np.linalg.norm(goal - pos)) < 0.02
     if not ok:
@@ -565,29 +560,31 @@ def servo_lin(
     return ok
 
 
-def _interp_n(sim: Sim, duration: float, physics: bool) -> int:
+def _no_kinematic(physics: bool) -> None:
+    if not physics:
+        raise ValueError("kinematic moves were removed: the arm moves only by its servos (physics=True)")
+
+
+def _interp_n(sim: Sim, duration: float) -> int:
     """Physics steps for a move. Carries keep the old floor so the grasp can track."""
     duration = max(1e-3, float(duration) * motion_scale())
     n = int(round(duration / sim.dt))
-    if physics:
-        return max(8 if fast_enabled() else 30, n)
-    return max(2, n)
+    return max(8 if fast_enabled() else 30, n)
 
 
 def move_ik(
     sim: Sim,
     target_pos,
     duration: float = 1.0,
-    physics: bool = False,
+    physics: bool = True,
     settle: int | None = None,
     **ik_kwargs,
 ) -> bool:
-    """Solve IK from a snapshot, then interpolate joints to that configuration.
+    """Solve IK from a snapshot, then servo the joints to that configuration under physics.
 
-    physics=False: re-assert qpos each step (stiff free-space motion).
-    physics=True:  ctrl-only tracking so contacts can lift a grasped object.
-    down=True:     solve_ik_down (gripper +X world-down) instead of position IK.
+    down=True: solve_ik_down (gripper +X world-down) instead of position IK.
     """
+    _no_kinematic(physics)
     start = sim.qpos()
     down = bool(ik_kwargs.pop("down", False))
     # guard: callable checked after every physics step; returning truthy
@@ -606,32 +603,22 @@ def move_ik(
         return False
     goal = sim.qpos()
     sim.set_qpos(start, hold=True)
-    n = _interp_n(sim, duration, physics)
+    n = _interp_n(sim, duration)
     for i in range(n):
         u = (i + 1) / n
         u = u * u * (3 - 2 * u)
-        cmd = {k: start[k] + (goal[k] - start[k]) * u for k in start}
-        if physics:
-            sim.set_ctrl(cmd)
-        else:
-            sim.set_qpos(cmd, hold=True)
+        sim.set_ctrl({k: start[k] + (goal[k] - start[k]) * u for k in start})
         sim.step()
-        if not physics:
-            sim.set_qpos(cmd, hold=True)
         if guard is not None:
             hit = guard()
             if hit:
                 sim._last_abort = hit
-                if physics:
-                    sim.hold(sim.qpos())
+                sim.hold(sim.qpos())
                 return False
-    if physics:
-        sim.hold(goal)
-        extra = (4 if fast_enabled() else 20) if settle is None else max(0, int(settle))
-        if extra:
-            sim.step(extra)
-    else:
-        sim.set_qpos({**start, **goal}, hold=True)
+    sim.hold(goal)
+    extra = (4 if fast_enabled() else 20) if settle is None else max(0, int(settle))
+    if extra:
+        sim.step(extra)
     pos, _ = sim.site_pose(EE_SITE)
     ok = float(np.linalg.norm(np.asarray(target_pos) - pos)) < 0.02
     if not ok:
@@ -653,6 +640,7 @@ def move_lin(
     wrist through a placed piece. Short Cartesian segments keep the fingers
     on the intended extract path.
     """
+    _no_kinematic(physics)
     settle = ik_kwargs.pop("settle", None)
     start, _ = sim.site_pose(EE_SITE)
     goal = np.asarray(target_pos, dtype=np.float64)
@@ -660,10 +648,7 @@ def move_lin(
     for i in range(n_wp):
         u = (i + 1) / n_wp
         wp = start + (goal - start) * u
-        hold = settle
-        if not physics and i < n_wp - 1:
-            hold = 0
-        if not move_ik(sim, wp, duration=dt, physics=physics, settle=hold, **ik_kwargs):
+        if not move_ik(sim, wp, duration=dt, settle=settle, **ik_kwargs):
             fail = getattr(sim, "_last_ik_fail", None)
             if isinstance(fail, dict):
                 fail["lin_wp"] = f"{i + 1}/{n_wp}"
@@ -673,22 +658,14 @@ def move_lin(
 
 
 def move_qpos(sim: Sim, goal: dict[str, float], duration: float = 1.0, physics: bool = True):
-    """Interpolate to a known joint configuration."""
+    """Servo to a known joint configuration under physics."""
+    _no_kinematic(physics)
     start = sim.qpos()
-    n = _interp_n(sim, duration, physics)
+    n = _interp_n(sim, duration)
     for i in range(n):
         u = (i + 1) / n
         u = u * u * (3 - 2 * u)
-        cmd = {k: start[k] + (goal.get(k, start[k]) - start[k]) * u for k in start}
-        if physics:
-            sim.set_ctrl(cmd)
-        else:
-            sim.set_qpos(cmd, hold=True)
+        sim.set_ctrl({k: start[k] + (goal.get(k, start[k]) - start[k]) * u for k in start})
         sim.step()
-        if not physics:
-            sim.set_qpos(cmd, hold=True)
-    if physics:
-        sim.hold({**start, **goal})
-        sim.step(4 if fast_enabled() else 16)
-    else:
-        sim.set_qpos({**start, **goal}, hold=True)
+    sim.hold({**start, **goal})
+    sim.step(4 if fast_enabled() else 16)

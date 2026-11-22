@@ -1855,7 +1855,7 @@ def _js_escape_hole(sim: Sim, cfg: dict, tid: str, pose: dict, closed: float) ->
     last = {n: sim.qpos()[n] for n in ARM_JOINTS}
     for _ in range(12):
         if not grasp_acquired(sim, tid):
-            sim.set_qpos({**last, "gripper": float(closed)}, hold=True)
+            _move_q_hold(sim, last, closed, duration=0.2)
             return last if grasp_acquired(sim, tid) else None
         ee, _ = sim.site_pose(EE_SITE)
         r = float(np.linalg.norm(ee[:2] - base))
@@ -1865,7 +1865,7 @@ def _js_escape_hole(sim: Sim, cfg: dict, tid: str, pose: dict, closed: float) ->
         away = _outward_xy(ee[:2], cfg, 0.006)
         tgt = [float(away[0]), float(away[1]), float(ee[2])]
         if not _move_hold(sim, tgt, closed, duration=0.28, n_wp=3, lock=lock, tid=tid):
-            sim.set_qpos({**last, "gripper": float(closed)}, hold=True)
+            _move_q_hold(sim, last, closed, duration=0.2)
             return last if grasp_acquired(sim, tid) else None
         last = {n: sim.qpos()[n] for n in ARM_JOINTS}
     return last if grasp_acquired(sim, tid) else None

@@ -3,13 +3,12 @@
 The controller gets a Robot, never the physics Sim. A Robot is a Sim over its
 own copy of the scene model (the belief). Its arm follows joint readings from
 the world after every step; its pieces sit wherever perception last put them.
-Planning, IK and clearance run on that copy unchanged. Actuator commands and
-camera renders go to the world.
+Planning, IK and clearance run on that copy unchanged: a qpos write is a
+probe of the belief and never moves the world arm. Actuator commands and
+camera renders go to the world, so the arm moves only by its servos.
 
-Two flags open the wall for reference runs:
+One flag opens the wall for reference runs:
   cheat_state   belief pieces and contact queries mirror the world (perfect perception)
-  cheat_motion  qpos writes with hold=True also teleport the world arm (legacy kinematic moves)
-Both on reproduces the old ground-truth controller. Both off is the real robot.
 """
 
 from __future__ import annotations
@@ -57,18 +56,16 @@ def open_robot(world: Sim, wall: str = "cheat"):
     """Controller handle for `world`.
 
     off         the world itself (no wall, legacy)
-    cheat       Robot with perfect state and teleporting motion (must reproduce off)
-    perception  state from perception only, legacy kinematic motion
+    cheat       Robot with perfect state, actuated motion
+    perception  same as real since the teleporting motion was removed (wall kept for old commands)
     real        state from perception only, actuated motion only
     """
     if wall == "off":
         return world
     if wall == "cheat":
-        return Robot(world, cheat_state=True, cheat_motion=True)
-    if wall == "perception":
-        return Robot(world, cheat_state=False, cheat_motion=True)
-    if wall == "real":
-        return Robot(world, cheat_state=False, cheat_motion=False)
+        return Robot(world, cheat_state=True)
+    if wall in ("perception", "real"):
+        return Robot(world, cheat_state=False)
     raise ValueError(f"wall must be one of {WALLS}")
 
 
@@ -84,11 +81,11 @@ def piece_free_joints(model) -> list[int]:
 
 
 class Robot(Sim):
-    def __init__(self, world: Sim, cheat_state: bool = False, cheat_motion: bool = False):
+    def __init__(self, world: Sim, cheat_state: bool = False):
         super().__init__(xml_path=world.xml_path, cfg=world.cfg)
         self._world = world
         self.cheat_state = bool(cheat_state)
-        self.cheat_motion = bool(cheat_motion)
+        self._posed = False  # belief arm moved by a probe since the last encoder read
         self.model.opt.timestep = world.model.opt.timestep
         self.dt = world.dt
         self.model.body_pos[:] = world.model.body_pos
@@ -117,6 +114,7 @@ class Robot(Sim):
             mujoco.mj_kinematics(self.model, self.data)
             self._track_held()
         self.data.qvel[:] = 0.0
+        self._posed = False
         mujoco.mj_forward(self.model, self.data)
 
     def step(self, n: int = 1):
@@ -132,9 +130,9 @@ class Robot(Sim):
         self._sync()
 
     def set_qpos(self, positions: dict[str, float], hold: bool = True):
+        """Pose the belief arm (a planning probe). With hold, the servo targets follow on the next step."""
         super().set_qpos(positions, hold=hold)
-        if hold and self.cheat_motion:
-            self._world.set_qpos(positions, hold=True)
+        self._posed = True
 
     def actuator_forces(self) -> np.ndarray:
         return self._world.actuator_forces()
@@ -183,15 +181,17 @@ class Robot(Sim):
             raise GroundTruthAccess(f"{body} has not been perceived")
         return super().object_pose(body)
 
-    # -- contacts: measured in the world when cheating, else predicted by belief
+    # -- contacts: measured in the world when cheating, else predicted by belief.
+    # A probe poses only the belief arm, so its contacts come from the belief
+    # (under cheat_state the belief pieces mirror the world).
 
     def contact_bodies(self):
-        if self.cheat_state:
+        if self.cheat_state and not self._posed:
             return self._world.contact_bodies()
         return super().contact_bodies()
 
     def contacts_with(self, body: str) -> list[dict]:
-        if self.cheat_state:
+        if self.cheat_state and not self._posed:
             return self._world.contacts_with(body)
         return super().contacts_with(body)
 
