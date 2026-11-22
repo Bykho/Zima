@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Closed-loop sim verification. Agent runs this after every sim change.
 
-  python sim/verify.py          # MuJoCo tests + centered GT and vision pick-place
-  python sim/verify.py --quick  # load/joints/IK only
+  python sim/verify.py            # MuJoCo tests + centered GT and vision pick-place
+  python sim/verify.py --quick    # load/joints/IK only
+  python sim/verify.py --studies  # plus each study suite's quick subset vs its committed baseline
 """
 from __future__ import annotations
 
@@ -40,6 +41,8 @@ def main():
         steps.append(
             ([str(PY), "sim/pickup.py", "--headless", "--vision", "--wall", "perception"], "vision pick-place (perception only)")
         )
+    if "--studies" in sys.argv:
+        steps.append(([str(PY), "sim/studies.py"], "studies (quick subsets vs baselines)"))
     results = [run(cmd, label) for cmd, label in steps]
     passed = sum(results)
     total = len(results)

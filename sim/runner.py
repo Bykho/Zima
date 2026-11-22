@@ -215,26 +215,31 @@ def _fail_item(args: tuple, reason: str, stage: str, t: float) -> dict:
     return {"suite": suite, **SUITES[suite].fail_row(case, wall, reason, stage, t)}
 
 
-def select_cases(suite: str, only: list[str]) -> list[dict]:
+def select_cases(suite: str, only: list[str], ids: list[str] | None = None) -> list[dict]:
+    """Cases whose id contains any `only` substring, or whose id is exactly in `ids`."""
     from suites import SUITES
 
+    if ids is not None:
+        want = set(ids)
+        return [c for c in SUITES[suite].cases() if c["id"] in want]
     keys = only or [""]
     return [c for c in SUITES[suite].cases() if any(k in c["id"] for k in keys)]
 
 
 def run(suites: list[str], walls: list[str], *, jobs: int = DEFAULT_JOBS, timeout: float | None = None,
-        only: list[str] | None = None, tag: str = "latest", out: Path | None = None, on_row=None) -> tuple[list[dict], Path]:
+        only: list[str] | None = None, ids: list[str] | None = None, tag: str = "latest", out: Path | None = None,
+        on_row=None) -> tuple[list[dict], Path]:
     """Run every case of every suite on every wall. Returns (rows, run dir)."""
     from suites import SUITES
 
     work = []
     for s in suites:
         t = timeout if timeout is not None else SUITES[s].timeout
-        cases = select_cases(s, only or [])
+        cases = select_cases(s, only or [], ids)
         work += [(s, c, w, t) for w in walls for c in cases]
     run_dir = (out or RUNS) / tag
     run_dir.mkdir(parents=True, exist_ok=True)
-    meta = {"tag": tag, "suites": suites, "walls": walls, "jobs": jobs, "only": only or [], "episodes": len(work),
+    meta = {"tag": tag, "suites": suites, "walls": walls, "jobs": jobs, "only": only or [], "ids": ids, "episodes": len(work),
             "started": time.strftime("%Y-%m-%dT%H:%M:%S"), **run_meta()}
     rows_path = run_dir / "rows.jsonl"
     rows_path.write_text("")
