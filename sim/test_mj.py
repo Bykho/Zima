@@ -276,8 +276,8 @@ def test_reachable_approach_near_base():
         find_pregrasp_pose,
         ray_approach_candidates,
         seed_vertical,
-        _scoop_axis,
     )
+    from stages.recovery import _scoop_axis
 
     cfg = load_config()
     sim = Sim(cfg=cfg)
@@ -360,9 +360,9 @@ def test_nest_stands_fallen():
         in_well,
         queen_tilt_deg,
         queen_upright,
-        recover_to_nest,
         seed_vertical,
     )
+    from stages.recovery import recover_to_nest
     from squares import nest_xyz
 
     cfg = load_config()

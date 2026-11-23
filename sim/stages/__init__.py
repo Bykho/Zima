@@ -16,7 +16,8 @@ import importlib
 
 from stages.types import Fail, Move, Stop
 
-# Methods the runner calls, per stage (observe also confirms; retreat also unhooks).
+# Pipeline order. observe also confirms the place; retreat also unhooks before observe;
+# recovery runs only when a stage fails (and is gated by `pickup.recover_fallen`).
 ORDER = ("observe", "grasp_plan", "approach", "close", "carry", "release", "retreat")
 DEFAULTS = {
     "observe": "wrist_vision",
@@ -26,6 +27,7 @@ DEFAULTS = {
     "carry": "plumb_then_legacy",
     "release": "open_at_place",
     "retreat": "pad_backoff",
+    "recovery": "nest",
 }
 
 _REGISTRY: dict[str, dict[str, type]] = {s: {} for s in DEFAULTS}
@@ -72,7 +74,7 @@ def resolve(cfg: dict | None, pipeline: dict | None = None) -> dict[str, object]
     return out
 
 
-MODULES = ("observe", "grasp_plan", "approach", "close", "carry", "release", "retreat")
+MODULES = ("observe", "grasp_plan", "approach", "close", "carry", "release", "retreat", "recovery")
 
 
 def _load() -> None:
