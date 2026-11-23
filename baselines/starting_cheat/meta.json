@@ -1,5 +1,5 @@
 {
-  "tag": "a1_linux_starting",
+  "tag": "rb_start",
   "suites": [
     "starting"
   ],
@@ -10,8 +10,8 @@
   "only": [],
   "ids": null,
   "episodes": 64,
-  "started": "2026-11-23T07:02:31",
-  "commit": "43ae006d071df2c504d8a67beddf78f55882e42f",
+  "started": "2026-11-23T08:46:34",
+  "commit": "949bee65494a7b9cb319dea6abc7eb9dc54e1a0d",
   "dirty": false,
   "diff_sha": null,
   "config_sha": "3138c86592fe6fe0",
@@ -33,10 +33,10 @@
     "--jobs",
     "4",
     "--tag",
-    "a1_linux_starting"
+    "rb_start"
   ],
-  "finished": "2026-11-23T07:04:33",
-  "wall_clock_s": 122,
+  "finished": "2026-11-23T08:48:29",
+  "wall_clock_s": 114,
   "baseline": "starting_cheat",
-  "from_run": "a1_linux_starting"
+  "from_run": "rb_start"
 }

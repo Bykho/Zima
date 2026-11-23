@@ -1,24 +1,23 @@
 {
-  "tag": "a1_linux",
+  "tag": "rb_all",
   "suites": [
-    "core",
     "grasp",
     "matrix",
+    "neighbors",
     "offsets",
     "perception_error",
-    "neighbors",
     "transport"
   ],
   "walls": [
-    "real",
-    "cheat"
+    "cheat",
+    "real"
   ],
   "jobs": 4,
   "only": [],
   "ids": null,
-  "episodes": 734,
-  "started": "2026-11-23T06:34:18",
-  "commit": "69ba560d6b132940761c2ea211c16cb8f139dab0",
+  "episodes": 630,
+  "started": "2026-11-23T08:39:45",
+  "commit": "949bee65494a7b9cb319dea6abc7eb9dc54e1a0d",
   "dirty": false,
   "diff_sha": null,
   "config_sha": "3138c86592fe6fe0",
@@ -34,16 +33,16 @@
   "argv": [
     "sim/run.py",
     "--suite",
-    "core,grasp,matrix,offsets,perception_error,neighbors,transport",
+    "grasp,matrix,neighbors,offsets,perception_error,transport",
     "--walls",
-    "real,cheat",
+    "cheat,real",
     "--jobs",
     "4",
     "--tag",
-    "a1_linux"
+    "rb_all"
   ],
-  "finished": "2026-11-23T06:46:22",
-  "wall_clock_s": 724,
+  "finished": "2026-11-23T08:46:34",
+  "wall_clock_s": 409,
   "baseline": "matrix_real",
-  "from_run": "a1_linux"
+  "from_run": "rb_all"
 }
