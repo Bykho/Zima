@@ -1592,7 +1592,9 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--video", action="store_true", help="write overview+side mp4 under sim/debug/pickup/")
     parser.add_argument("--wall", choices=WALLS, default="real", help="controller/world separation (robot.py)")
+    stages.cli_arg(parser)
     args = parser.parse_args()
+    stages.select(args.stage)
     args.vision = not args.gt
     cfg = load_config()
     spawn_xy = None

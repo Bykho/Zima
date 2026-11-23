@@ -424,8 +424,11 @@ def _transport_to(
     return False, "straight"
 
 
-def carry(m: Move):
-    """Lift, transport and lower to just above the destination (plumb, else legacy)."""
+def carry(m: Move, use_plumb: bool = True, legacy_fallback: bool = True):
+    """Lift, transport and lower to just above the destination (plumb, else legacy).
+
+    Plumb is not tried for bowl dumps, nest re-picks and lift-only moves; those always go legacy.
+    """
     sim, cfg, sc, result, tid, surface, p, dest, dest_xy, off_board, grasp, plan_xy, hold, clutter, lift_z, place_hover, closed_g, release_open = m.sim, m.cfg, m.sc, m.result, m.tid, m.surface, m.p, m.dest, m.dest_xy, m.off_board, m.grasp, m.plan_xy, m.hold, m.clutter, m.lift_z, m.place_hover, m.closed_g, m.release_open
     g_close, _ = sim.site_pose(EE_SITE)
     pick_xy = np.array([grasp[0], grasp[1]], dtype=np.float64)
@@ -484,8 +487,13 @@ def carry(m: Move):
 
     sim.on_step = _on_step
     plumbed = None
-    if not off_board and not sc.get("_from_nest") and sc.get("stop_after") != "lift":
+    plumb_applies = not off_board and not sc.get("_from_nest") and sc.get("stop_after") != "lift"
+    if use_plumb and plumb_applies:
         plumbed = _plumb_transport(sim, tid, result, dest_xy, surface + place_hover, lift_z, obstacles)
+        if plumbed is None and not legacy_fallback:
+            result["failure_reason"] = "IK_NO_SOLUTION"
+            log_state(sim, "fail_lift", extra={"path": "plumb"})
+            return Fail("carry", result["failure_reason"])
     if plumbed is not None and plumbed.get("failure_reason"):
         result["failure_reason"] = plumbed["failure_reason"]
         return Fail("carry", result["failure_reason"], "pick")
@@ -729,3 +737,19 @@ class PlumbThenLegacy:
 
     def carry(self, m):
         return carry(m)
+
+
+@register("carry", "legacy_only")
+class LegacyOnly:
+    """A/B variant: skip the plumb plan, always the legacy lift/transport/lower."""
+
+    def carry(self, m):
+        return carry(m, use_plumb=False)
+
+
+@register("carry", "plumb_only")
+class PlumbOnly:
+    """A/B variant: no legacy fallback when plumb finds no plan (the move fails IK_NO_SOLUTION)."""
+
+    def carry(self, m):
+        return carry(m, legacy_fallback=False)

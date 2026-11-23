@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
 import evaluate_move
+import stages
 from episode import discard_square, occupancy_text, play_move
 from fast import clock_scale
 from mj import DEBUG_DIR, Sim, load_config
@@ -191,7 +192,9 @@ def main() -> int:
         help="keep playing after a physical fail (collateral, drop, …)",
     )
     parser.add_argument("--wall", choices=WALLS, default="real", help="controller/world separation (robot.py)")
+    stages.cli_arg(parser)
     args = parser.parse_args()
+    stages.select(args.stage)
     use_vision = not args.gt
     want_view = not args.headless
     if args.speed is not None:

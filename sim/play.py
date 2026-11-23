@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sim"))
 
 import evaluate_move
+import stages
 from episode import occupancy_text, play_move
 from mj import Sim, load_config
 from pickup import FULL_BOARD_XML, seed_vertical
@@ -212,7 +213,9 @@ def main() -> int:
     parser.add_argument("--headless", action="store_true", help="no viewer")
     parser.add_argument("--speed", type=float, default=None, help="video clock (2 = 2x dt). omit for real-time")
     parser.add_argument("--wall", choices=WALLS, default="real", help="controller/world separation (robot.py)")
+    stages.cli_arg(parser)
     args = parser.parse_args()
+    stages.select(args.stage)
     interactive = not args.moves
     want_view = (not args.headless) and (args.view or interactive)
     if args.speed is not None:

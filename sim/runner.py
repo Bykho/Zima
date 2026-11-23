@@ -215,23 +215,76 @@ def run_meta() -> dict:
     }
 
 
-def _run_item(args: tuple) -> dict:
-    suite, case, wall, timeout = args
-    from suites import SUITES
-
+def variant_label(label: str) -> str:
+    """Row label: the `--variants` label, with `realism` folded in when that profile is on."""
     import realism
 
+    if not realism.active():
+        return label
+    return "realism" if label == "base" else f"{label}+realism"
+
+
+def _run_item(args: tuple) -> dict:
+    suite, case, wall, timeout, label, spec = args
+    from suites import SUITES
+
+    os.environ[stages_env()] = spec
     row = SUITES[suite].run(case, wall, timeout)
-    return {"suite": suite, "variant": realism.variant(), **row}
+    out = {"suite": suite, "variant": variant_label(label), **row}
+    if not SUITES[suite].kinematic:
+        import stages
+        from mj import load_config
+
+        out.update(stages.describe(load_config()))
+    return out
 
 
 def _fail_item(args: tuple, reason: str, stage: str, t: float) -> dict:
-    suite, case, wall, timeout = args
+    suite, case, wall, timeout, label, spec = args
     from suites import SUITES
 
-    import realism
+    return {"suite": suite, "variant": variant_label(label), **SUITES[suite].fail_row(case, wall, reason, stage, t)}
 
-    return {"suite": suite, "variant": realism.variant(), **SUITES[suite].fail_row(case, wall, reason, stage, t)}
+
+def stages_env() -> str:
+    from stages import ENV
+
+    return ENV
+
+
+def parse_variants(text: str, base_spec: str = "") -> list[tuple[str, str]]:
+    """`base,new=carry:legacy_only,release:x;carry.k=1,other=...` -> [(label, spec)].
+
+    A token with `=` before any `:` starts a variant; a bare `stage:impl` token continues the
+    previous one. `base` is the default pipeline. Every spec is layered over `base_spec` (`--stage`).
+    """
+    out: list[list[str]] = []
+    for tok in filter(None, (t.strip() for t in (text or "base").split(","))):
+        eq, colon = tok.find("="), tok.find(":")
+        if eq > 0 and (colon < 0 or eq < colon):
+            label, spec = tok[:eq], tok[eq + 1:]
+            out.append([label, spec])
+        elif tok == "base" or ":" not in tok:
+            out.append([tok, ""])
+        else:
+            if not out:
+                raise ValueError(f"variant spec {tok!r} has no label (write label=stage:impl)")
+            out[-1][1] = f"{out[-1][1]},{tok}" if out[-1][1] else tok
+    labels = [v[0] for v in out]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"duplicate variant labels in {text!r}")
+    return [(label, _layer(base_spec, spec)) for label, spec in out]
+
+
+def _layer(base: str, spec: str) -> str:
+    """Join two specs; `;` settings stay at the end."""
+    heads, sets = [], []
+    for part in (base, spec):
+        head, *rest = (part or "").split(";")
+        if head.strip():
+            heads.append(head.strip())
+        sets += [r for r in rest if r.strip()]
+    return ",".join(heads) + "".join(f";{x}" for x in sets)
 
 
 def select_cases(suite: str, only: list[str], ids: list[str] | None = None) -> list[dict]:
@@ -247,18 +300,23 @@ def select_cases(suite: str, only: list[str], ids: list[str] | None = None) -> l
 
 def run(suites: list[str], walls: list[str], *, jobs: int = DEFAULT_JOBS, timeout: float | None = None,
         only: list[str] | None = None, ids: list[str] | None = None, tag: str = "latest", out: Path | None = None,
-        on_row=None) -> tuple[list[dict], Path]:
-    """Run every case of every suite on every wall. Returns (rows, run dir)."""
+        on_row=None, variants: list[tuple[str, str]] | None = None) -> tuple[list[dict], Path]:
+    """Run every case of every suite on every wall, once per (label, pipeline spec) variant. Returns (rows, run dir)."""
     from suites import SUITES
 
+    if not variants:
+        spec = os.environ.get(stages_env(), "")
+        variants = [(spec or "base", spec)]
     work = []
     for s in suites:
         t = timeout if timeout is not None else SUITES[s].timeout
         cases = select_cases(s, only or [], ids)
-        work += [(s, c, w, t) for w in SUITES[s].walls(walls) for c in cases]
+        vs = variants if not SUITES[s].kinematic else variants[:1]
+        work += [(s, c, w, t, label, spec) for label, spec in vs for w in SUITES[s].walls(walls) for c in cases]
     run_dir = (out or RUNS) / tag
     run_dir.mkdir(parents=True, exist_ok=True)
     meta = {"tag": tag, "suites": suites, "walls": walls, "jobs": jobs, "only": only or [], "ids": ids, "episodes": len(work),
+            "variants": [{"label": variant_label(label), "pipeline": spec} for label, spec in variants],
             "started": time.strftime("%Y-%m-%dT%H:%M:%S"), **run_meta()}
     rows_path = run_dir / "rows.jsonl"
     rows_path.write_text("")

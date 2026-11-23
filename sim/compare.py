@@ -6,6 +6,7 @@
   python sim/compare.py runs/new core_cheat          # a named baseline
   python sim/compare.py runs/new sim/debug/harness/stock_baseline.jsonl
   python sim/compare.py runs/new --exact             # exit 1 on any ok/reason/stage difference
+  python sim/compare.py runs/ab --by variant         # each A/B variant of one run beside its base
 
 Exit codes: 0 no regression, 1 regression (ok -> fail; with --exact any difference
 or missing row), 2 the two sides ran on different config.yaml (pass --allow-config).
@@ -186,8 +187,8 @@ def report(res: dict, new_label: str, old_label: str) -> str:
 
 
 def save_baselines(run_dir: Path) -> list[str]:
-    """Split a run into baselines/<suite>_<wall>/ (rows + meta)."""
-    rows = _read_rows(run_dir / "rows.jsonl")
+    """Split a run's `base` rows into baselines/<suite>_<wall>/ (rows + meta)."""
+    rows = [r for r in _read_rows(run_dir / "rows.jsonl") if r.get("variant", "base") == "base"]
     meta = json.loads((run_dir / "meta.json").read_text())
     saved = []
     for suite, wall in sorted({(r.get("suite", ""), r["wall"]) for r in rows}):
@@ -203,19 +204,40 @@ def save_baselines(run_dir: Path) -> list[str]:
     return saved
 
 
+def by_variant(rows: list[dict], label: str, ref: str) -> int:
+    """Each variant of one run against the `ref` variant, case by case. Exit 1 if any variant regresses."""
+    variants = sorted({r.get("variant", "base") for r in rows} - {ref})
+    base = [r for r in rows if r.get("variant", "base") == ref]
+    if not base or not variants:
+        raise SystemExit(f"--by variant needs rows of variant {ref!r} and at least one other in {label}")
+    regress = False
+    for v in variants:
+        res = compare([{**r, "variant": ref} for r in rows if r.get("variant") == v], base)
+        print(report(res, f"{label} [{v}]", f"{label} [{ref}]"))
+        print()
+        regress = regress or any(a["ok"] for _, a, _ in res["flips"])
+    return 1 if regress else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("new", help="run dir, rows .jsonl, or baseline name")
     ap.add_argument("old", nargs="?", default=None, help="same; default: the committed baselines the new rows cover")
     ap.add_argument("--exact", action="store_true", help="fail on any ok/reason/stage difference or missing row")
     ap.add_argument("--allow-config", action="store_true", help="do not fail when config.yaml differs")
-    ap.add_argument("--save-baseline", action="store_true", help="write NEW (a run dir) to baselines/<suite>_<wall>/ and exit")
+    ap.add_argument("--save-baseline", action="store_true", help="write NEW's base rows (a run dir) to baselines/<suite>_<wall>/ and exit")
+    ap.add_argument("--by", choices=("variant",), default=None, help="variant: compare each variant in NEW against --ref within NEW")
+    ap.add_argument("--ref", default="base", help="reference variant for --by variant")
     args = ap.parse_args(argv)
     if args.save_baseline:
         for s in save_baselines(Path(args.new)):
             print(f"saved baseline {s}")
         return 0
     new, new_meta, new_label = load(args.new)
+    if args.by == "variant":
+        return by_variant(new, new_label, args.ref)
+    if args.old is None:
+        new = [r for r in new if r.get("variant", "base") in ("base", "realism")]
     old, old_meta, old_label = load(args.old) if args.old else load_baselines(new)
     res = compare(new, old)
     print(report(res, new_label, old_label))
