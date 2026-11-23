@@ -5,15 +5,6 @@ from __future__ import annotations
 from stages import register
 
 
-@register("grasp_plan", "piece_table")
-class PieceTable:
-    """Grasp point, height and pregrasp from the piece table plus the fixed-pad shift; pitch the wrist vertical."""
-
-    def plan(self, m):
-        import pickup
-
-        return pickup._stage_grasp_plan(m)
-
 
 @register("approach", "vertical_column")
 class VerticalColumn:
