@@ -72,8 +72,12 @@ def resolve(cfg: dict | None, pipeline: dict | None = None) -> dict[str, object]
     return out
 
 
+MODULES = ("defaults", "observe")
+
+
 def _load() -> None:
-    importlib.import_module("stages.defaults")
+    for mod in MODULES:
+        importlib.import_module(f"stages.{mod}")
 
 
 __all__ = ["DEFAULTS", "ORDER", "Fail", "Move", "Stop", "register", "registered", "resolve"]

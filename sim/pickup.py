@@ -2765,21 +2765,6 @@ def _belief_set_down(sim, tid: str, surface: float) -> None:
     sim.believe(tid, [float(p[0]), float(p[1]), surface], (np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)))
 
 
-def _placed(sim, cfg: dict, tid: str, dest: str, dest_xy, surface: float, off_board: bool) -> bool:
-    """Is the released piece where it should be? The wrist camera judges when perceiving."""
-    if off_board:
-        return bool(bowl_contains(sim.object_pose(tid)[0], dest_xy))
-    if _perceiving(sim):
-        look = verify_piece(sim, cfg, tid, dest)
-        return bool(look.get("seen") and look.get("upright") and square_of_body(sim, cfg, tid) == dest)
-    _, quat = sim.object_pose(tid)
-    return bool(
-        square_of_body(sim, cfg, tid) == dest
-        and queen_upright(quat, tilt_max=0.5)
-        and object_on_board(sim, surface, object_id=tid)
-    )
-
-
 def verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
     """Wrist look at `square`; belief takes the observed XY and upright/lying."""
     diag.emit("look_start", sim, tid=tid, square=square)
@@ -2843,47 +2828,6 @@ def _stage_unhook(m: Move):
     else:
         open_gripper(sim, open_g, steps=40)
     settle_queen(sim, steps=48)
-
-
-def _stage_observe(m: Move):
-    """Wrist look over the source; `queen_xyz` is the believed piece position."""
-    sim, cfg, sc, result, tid, surface, source, use_vision, grasp_z = m.sim, m.cfg, m.sc, m.result, m.tid, m.surface, m.source, m.use_vision, m.grasp_z
-    if sc.get("_from_nest"):
-        # Nest is off the commanded square; do not hover the empty source.
-        queen_xyz, _ = sim.object_pose(tid)
-        nest_z = float(nest_xyz(cfg)[2])
-        grasp_z = max(0.030, float(queen_xyz[2]) - surface + 0.022, nest_z - surface + 0.008)
-        log_state(sim, "002_observe", extra={"from_nest": True, "target": _xyz(queen_xyz)})
-    elif use_vision:
-        prior = square_to_world(source, cfg, z=surface)
-        look = _reach_observe(sim, cfg, prior, tid)
-        if look is None:
-            result["failure_reason"] = "IK_NO_SOLUTION"
-            result["ee_requested"] = _xyz(prior)
-            log_state(sim, "fail_observe", extra={"target": result["ee_requested"]})
-            return Fail("observe", result["failure_reason"], "pick")
-        log_state(sim, "002_observe", extra={"target": _xyz(look)})
-        queen_xyz = locate_queen(sim, cfg, result, source)
-        if queen_xyz is None:
-            # Commanded square is already the prior. Empty cloud on rank 8
-            # (b8c6 after g1f3) should not abort the move.
-            queen_xyz = prior
-            result["queen_detected"] = True
-            result["perception_fallback"] = "square"
-        else:
-            result["queen_detected"] = True
-    else:
-        queen_xyz, _ = sim.object_pose(tid)
-        observe = _reach_observe(sim, cfg, queen_xyz, tid)
-        if observe is None:
-            result["failure_reason"] = "IK_NO_SOLUTION"
-            result["ee_requested"] = _xyz(queen_xyz)
-            log_state(sim, "fail_observe", extra={"target": result["ee_requested"]})
-            return Fail("observe", result["failure_reason"], "pick")
-        log_state(sim, "002_observe", extra={"target": _xyz(observe)})
-        queen_xyz, _ = sim.object_pose(tid)
-    m.queen_xyz = queen_xyz
-    m.grasp_z = grasp_z
 
 
 def _stage_grasp_plan(m: Move):
@@ -3577,22 +3521,6 @@ def _stage_retreat(m: Move):
     settle_queen(sim, steps=48)
     m.retreated = retreated
     m.high = high
-
-
-def _stage_confirm(m: Move):
-    """Placed? The robot's own check (wrist look at the destination), then the final phase log."""
-    sim, cfg, result, tid, surface, dest, dest_xy, off_board, retreated, high = m.sim, m.cfg, m.result, m.tid, m.surface, m.dest, m.dest_xy, m.off_board, m.retreated, m.high
-    still_held = bool(grasp_acquired(sim, tid) and float(sim.object_pose(tid)[0][2]) > surface + 0.012)
-    result["placement_success"] = _placed(sim, cfg, tid, dest, dest_xy, surface, off_board) and not still_held
-    result["retreat_success"] = bool(retreated)
-    if not retreated:
-        result["ik_fail_phase"] = "010_final"
-        log_state(sim, "fail_retreat", extra={"target": _xyz(high)})
-    log_state(sim, "010_final")
-
-    if not result["placement_success"]:
-        result["failure_reason"] = "RELEASE_FAILURE" if still_held else "PLACEMENT_POSITION_ERROR"
-        return Fail("confirm", result["failure_reason"], "place")
 
 
 def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:

@@ -5,21 +5,6 @@ from __future__ import annotations
 from stages import register
 
 
-@register("observe", "wrist_vision")
-class WristVision:
-    """Reach an observe pose over the source and estimate the piece XY from the wrist depth image."""
-
-    def locate(self, m):
-        import pickup
-
-        return pickup._stage_observe(m)
-
-    def confirm(self, m):
-        import pickup
-
-        return pickup._stage_confirm(m)
-
-
 @register("grasp_plan", "piece_table")
 class PieceTable:
     """Grasp point, height and pregrasp from the piece table plus the fixed-pad shift; pitch the wrist vertical."""
