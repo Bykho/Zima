@@ -24,6 +24,7 @@ import mujoco
 import carry as plumb
 import diag
 import evaluate_move
+import stages
 
 from ik import (
     CARRY_ORI_WEIGHT,
@@ -55,6 +56,7 @@ from clearance import (
 )
 from perception import estimate_target_pose, observe_piece
 from sensor import capture as capture_wrist, robot_blocks_view, wrist_sees_point
+from stages.types import Fail, Move, Stop
 from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
@@ -2805,7 +2807,796 @@ def _verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
 VERIFY_UPRIGHT_FRAC = 0.7
 
 
+def _stage_unhook(m: Move):
+    """Free the hand from the last move: release, back off, open."""
+    sim, cfg, tid, open_g, release_open = m.sim, m.cfg, m.tid, m.open_g, m.release_open
+    gpos, _ = sim.site_pose(EE_SITE)
+    hugging = _jaws_on_piece(sim)
+    sim._pickup_phase = "000_unhook"
+    if hugging:
+        # Pads still wrap the last man. Open to release, then the same
+        # clear-then-rise as after place — a raw +Z here combs the lip.
+        wrap = _piece_in_jaws(sim)
+        open_gripper(sim, release_open, steps=80)
+        settle_queen(sim, steps=24)
+        if wrap:
+            _clear_then_rise(sim, cfg, wrap, z_min=0.11)
+        else:
+            _js_raise_ee(sim, z_min=0.11)
+        open_gripper(sim, open_g, steps=40)
+    elif float(gpos[2]) < 0.09:
+        # Clear of the last man: step out, then up.
+        away = _outward_xy(gpos[:2], cfg, 0.035)
+        wrist = ("wrist_flex", "wrist_roll")
+        others = obstacle_bodies(sim, skip={tid})
+        _safe_lin(
+            sim,
+            [float(away[0]), float(away[1]), float(gpos[2])],
+            cfg,
+            wrist,
+            obstacles=others,
+            skip={tid},
+            duration=0.45,
+        )
+        _js_raise_ee(sim, z_min=0.11)
+        open_gripper(sim, open_g, steps=40)
+    else:
+        open_gripper(sim, open_g, steps=40)
+    settle_queen(sim, steps=48)
+
+
+def _stage_observe(m: Move):
+    """Wrist look over the source; `queen_xyz` is the believed piece position."""
+    sim, cfg, sc, result, tid, surface, source, use_vision, grasp_z = m.sim, m.cfg, m.sc, m.result, m.tid, m.surface, m.source, m.use_vision, m.grasp_z
+    if sc.get("_from_nest"):
+        # Nest is off the commanded square; do not hover the empty source.
+        queen_xyz, _ = sim.object_pose(tid)
+        nest_z = float(nest_xyz(cfg)[2])
+        grasp_z = max(0.030, float(queen_xyz[2]) - surface + 0.022, nest_z - surface + 0.008)
+        log_state(sim, "002_observe", extra={"from_nest": True, "target": _xyz(queen_xyz)})
+    elif use_vision:
+        prior = square_to_world(source, cfg, z=surface)
+        look = _reach_observe(sim, cfg, prior, tid)
+        if look is None:
+            result["failure_reason"] = "IK_NO_SOLUTION"
+            result["ee_requested"] = _xyz(prior)
+            log_state(sim, "fail_observe", extra={"target": result["ee_requested"]})
+            return Fail("observe", result["failure_reason"], "pick")
+        log_state(sim, "002_observe", extra={"target": _xyz(look)})
+        queen_xyz = locate_queen(sim, cfg, result, source)
+        if queen_xyz is None:
+            # Commanded square is already the prior. Empty cloud on rank 8
+            # (b8c6 after g1f3) should not abort the move.
+            queen_xyz = prior
+            result["queen_detected"] = True
+            result["perception_fallback"] = "square"
+        else:
+            result["queen_detected"] = True
+    else:
+        queen_xyz, _ = sim.object_pose(tid)
+        observe = _reach_observe(sim, cfg, queen_xyz, tid)
+        if observe is None:
+            result["failure_reason"] = "IK_NO_SOLUTION"
+            result["ee_requested"] = _xyz(queen_xyz)
+            log_state(sim, "fail_observe", extra={"target": result["ee_requested"]})
+            return Fail("observe", result["failure_reason"], "pick")
+        log_state(sim, "002_observe", extra={"target": _xyz(observe)})
+        queen_xyz, _ = sim.object_pose(tid)
+    m.queen_xyz = queen_xyz
+    m.grasp_z = grasp_z
+
+
+def _stage_grasp_plan(m: Move):
+    """Grasp XY from the pinch model, wrist pitched vertical, pregrasp pose."""
+    sim, cfg, result, surface, queen_xyz, grasp_z, geom, pre_z = m.sim, m.cfg, m.result, m.surface, m.queen_xyz, m.grasp_z, m.geom, m.pre_z
+    plan_xy = perceived_xy(sim, queen_xyz)
+    # Vertical pinch: put the wrist where gripper +X is world-down at the
+    # grasp point before anything downstream snapshots the heading. Without
+    # this the observe pose's 30-50 deg flex was inherited (approach planner
+    # locks flex at its current value) and the fixed jaw tipped pieces over on
+    # close. Files a-f reach <3 deg; g/h get the least-tilted pose available.
+    vert = _vertical_wrist(sim, [plan_xy[0], plan_xy[1], surface + grasp_z])
+    if vert is not None:
+        result["vertical_flex"] = round(vert["wrist_flex"], 4)
+        result["vertical_tilt_deg"] = round(vert["tilt_deg"], 2)
+        _pitch_in_place(sim, vert["wrist_flex"])
+    grasp_xy = _seeded_grasp_xy(sim, cfg, plan_xy, geom, surface + grasp_z)
+    pre = find_pregrasp_pose(sim, cfg, grasp_xy)
+    if pre is None:
+        result["failure_reason"] = "IK_NO_SOLUTION"
+        result["ee_requested"] = _xyz([grasp_xy[0], grasp_xy[1], surface + pre_z])
+        log_state(sim, "fail_pregrasp", extra={"target": result["ee_requested"]})
+        return Fail("grasp_plan", result["failure_reason"], "pick")
+    m.plan_xy = plan_xy
+    m.grasp_xy = grasp_xy
+    m.pre = pre
+
+
+def _stage_approach(m: Move):
+    """Plan the approach, reach pregrasp, re-look and re-verify, descend to the grasp."""
+    sim, cfg, sc, result, tid, surface, source, use_vision, queen_xyz, grasp_z, geom, open_g, plan_xy, grasp_xy, pre, actual = m.sim, m.cfg, m.sc, m.result, m.tid, m.surface, m.source, m.use_vision, m.queen_xyz, m.grasp_z, m.geom, m.open_g, m.plan_xy, m.grasp_xy, m.pre, m.actual
+    result["transport_path"] = "straight"
+    clutter = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
+    result["occupied_neighbors"] = sorted(clutter)
+    grasp_plan = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
+
+    def _grasp_for_roll(roll: float | None) -> list[float]:
+        # The pinch axis rotates with wrist roll, so the fixed-pad shift does too.
+        xy = _grasp_xy_for_roll(sim, plan_xy, surface + grasp_z, geom, roll)
+        return [xy[0], xy[1], surface + grasp_z]
+
+    def _plan(pre_seed, grasp_seed):
+        return plan_approach(
+            sim,
+            pre_seed,
+            grasp_seed,
+            open_g,
+            clutter,
+            source=None if sc.get("_from_nest") else source,
+            cfg=cfg,
+            scenario=sc,
+            grasp_for_roll=_grasp_for_roll,
+            target=tid,
+        )
+
+    approach = _plan(pre, grasp_plan)
+    if approach.get("pre"):
+        pre = list(approach["pre"])
+    if approach.get("grasp"):
+        grasp_plan = list(approach["grasp"])
+        grasp_xy = grasp_plan[:2]
+    _plan_keys = ("ok", "roll", "gripper", "n_wp", "tried", "reachable", "rank", "reason", "pre_offset_xy", "block", "statuses", "degraded", "min_gap_mm")
+    result["approach_plan"] = {k: approach.get(k) for k in _plan_keys}
+    if not approach["ok"]:
+        result["failure_reason"] = (
+            "NO_COLLISION_FREE_APPROACH" if approach.get("reachable") else "IK_NO_SOLUTION"
+        )
+        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre), "approach": result["approach_plan"]})
+        return Fail("approach", result["failure_reason"], "pick")
+    lock: tuple[str, ...] = tuple(approach["lock_joints"])
+    # After close, lock wrist_roll so the pinch does not yaw around the stem.
+    # Leave wrist_flex free: carry IK pulls gripper +X toward world -Z so the
+    # piece stays upright as the shoulder/elbow reach across the board.
+    hold: tuple[str, ...] = tuple(
+        j for j in dict.fromkeys((*lock, "wrist_roll")) if j != "wrist_flex"
+    )
+    pickup_clear = bool(clutter) or approach["n_wp"] > 1
+    # Verified joint path for the descend (pre -> grasp); replayed verbatim.
+    descend_path = approach.get("path_q") if clutter else None
+    # Vertical pinch: pre, descend and grasp are all solved with gripper +X
+    # world-down (solve_ik_down); flex is a free joint the solver uses to keep
+    # the approach vertical while shoulder/elbow move. Roll stays locked when
+    # the planner chose one for neighbor clearance.
+    grasp_lock = tuple(j for j in lock if j != "wrist_flex")
+
+    def _apply_approach(plan: dict) -> bool:
+        """Set the planned roll + aperture, then bring the EE to its pregrasp."""
+        if plan["roll"] is not None:
+            _roll_in_place(sim, float(plan["roll"]))
+            result["approach_roll_err"] = round(abs(float(sim.qpos()["wrist_roll"]) - float(plan["roll"])), 3)
+        g_ap = float(plan["gripper"])
+        result["approach_gripper"] = None if abs(g_ap - open_g) < 0.02 else g_ap
+        if abs(g_ap - float(sim.qpos()["gripper"])) > 0.01:
+            open_gripper(sim, g_ap, steps=40)
+        # A straight line to the pregrasp from the last square (g4) sweeps the
+        # file and knocks whoever is in the way (fallen Nf3, then the e5 pawn
+        # → APPROACH_COLLISION). Hover over the target first so the pregrasp
+        # move is a short local drop.
+        gpos, _ = sim.site_pose(EE_SITE)
+        pre_xyz = np.asarray(plan["pre"], dtype=float)
+        if float(np.hypot(pre_xyz[0] - gpos[0], pre_xyz[1] - gpos[1])) > 0.05:
+            hover_z = max(float(pre_xyz[2]), _transit_z(sim, cfg, skip={tid}))
+            hover = [float(pre_xyz[0]), float(pre_xyz[1]), hover_z]
+            _safe_lin(
+                sim,
+                hover,
+                cfg,
+                ("wrist_flex", "wrist_roll"),
+                obstacles=clutter,
+                skip={tid},
+            )
+        if pickup_clear:
+            return move_lin(sim, plan["pre"], duration=1.0, physics=True, n_wp=6, lock_joints=grasp_lock, down=True)
+        return move_ik(sim, plan["pre"], duration=1.0, physics=True, lock_joints=grasp_lock, down=True)
+
+    if not _apply_approach(approach):
+        result["failure_reason"] = "IK_NO_SOLUTION"
+        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre)})
+        return Fail("approach", result["failure_reason"], "pick")
+    result["pregrasp_reached"] = True
+    log_state(sim, "003_pregrasp", extra={"target": _xyz(pre), "approach_gripper": result.get("approach_gripper"), "approach_roll": approach.get("roll")})
+
+    if not queen_upright(sim.object_pose(tid)[1]):
+        result["failure_reason"] = "APPROACH_COLLISION"
+        log_state(sim, "fail_pregrasp_knock")
+        return Fail("approach", result["failure_reason"], "pick")
+
+    if use_vision and not sc.get("_from_nest"):
+        refined = locate_queen(sim, cfg, result, source)
+        if refined is not None:
+            queen_xyz = refined
+            plan_xy = perceived_xy(sim, queen_xyz)
+            grasp_xy = _grasp_xy_for_roll(sim, plan_xy, surface + grasp_z, geom, approach.get("roll"))
+            # The plan was verified against the long-range estimate. Re-check
+            # the chosen approach on the refined grasp; if the jaws would now
+            # clip a bystander, re-plan from here before going down.
+            if clutter:
+                status = verify_approach(
+                    sim, pre, [grasp_xy[0], grasp_xy[1], surface + grasp_z], clutter,
+                    float(approach["gripper"]), approach.get("roll"), lock, cfg=cfg, target=tid,
+                    margin=HARD_MARGIN if approach.get("degraded") else None,
+                )
+                result["approach_reverify"] = status
+                if status == "ok":
+                    descend_path = getattr(sim, "_cand_path", None) or descend_path
+                if status != "ok":
+                    again = _plan(pre, [grasp_xy[0], grasp_xy[1], surface + grasp_z])
+                    result["approach_replan"] = {k: again.get(k) for k in _plan_keys}
+                    if not again["ok"]:
+                        result["failure_reason"] = (
+                            "NO_COLLISION_FREE_APPROACH" if again.get("reachable") else "IK_NO_SOLUTION"
+                        )
+                        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre), "approach": result["approach_replan"]})
+                        return Fail("approach", result["failure_reason"])
+                    approach = again
+                    lock = tuple(approach["lock_joints"])
+                    hold = tuple(j for j in dict.fromkeys((*lock, "wrist_roll")) if j != "wrist_flex")
+                    grasp_lock = tuple(j for j in lock if j != "wrist_flex")
+                    pre = list(approach["pre"])
+                    grasp_xy = list(approach["grasp"][:2])
+                    descend_path = approach.get("path_q")
+                    result["approach_plan"] = {k: approach.get(k) for k in _plan_keys}
+                    if not _apply_approach(approach):
+                        result["failure_reason"] = "IK_NO_SOLUTION"
+                        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre)})
+                        return Fail("approach", result["failure_reason"])
+                    log_state(sim, "003_pregrasp", extra={"target": _xyz(pre), "replanned": True})
+
+    result["pose_used_for_grasp"] = [float(plan_xy[0]), float(plan_xy[1]), float(np.asarray(queen_xyz)[2])]
+    result["perception_error"] = [
+        float((plan_xy[0] - actual[0]) * 1000.0),
+        float((plan_xy[1] - actual[1]) * 1000.0),
+    ]
+    grasp = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
+    result["ee_requested"] = _xyz(grasp)
+    result["transport_path"] = "straight"
+    column = _descend_column(sim, grasp, grasp_lock)
+    result["descend_column"] = column is not None or getattr(sim, "plumb_fail", None)
+    desc = physical_descend(
+        sim, grasp, duration=1.2, lock_joints=grasp_lock, path_q=column or descend_path
+    )
+    # Guard tripped: a robot link touched a bystander on the way down.
+    if desc.get("aborted"):
+        result["descend_aborted"] = desc["aborted"]
+        move_lin(sim, pre, duration=0.6, physics=True, n_wp=4, lock_joints=grasp_lock, down=True)
+        result["failure_reason"] = "APPROACH_COLLISION"
+        log_state(sim, "fail_descend", extra={"target": _xyz(grasp), "aborted": desc["aborted"]})
+        return Fail("approach", result["failure_reason"])
+    result["descend"] = {k: v for k, v in desc.items() if k not in ("samples", "ik_jaw", "jaw_before_close")}
+    result["ik_solved"] = bool(desc.get("ik_solved"))
+    result["ik_residual_mm"] = desc.get("ik_residual_mm")
+    result["ee_actual"] = desc.get("ee_actual")
+    result["ee_err_mm"] = desc.get("ee_err_mm")
+    result["approach_reached"] = bool(desc.get("approach_reached"))
+    result["joint_limit_margin_rad"] = desc.get("joint_limit_margin_rad")
+    result["pre_close_contacts"] = desc.get("pre_close_contacts", 0)
+    result["pre_close_gap_mm"] = desc.get("pre_close_gap_mm")
+    result["first_contact_jaw"] = desc.get("first_contact_jaw")
+    result["ik_jaw"] = desc.get("ik_jaw")
+    result["jaw_before_close"] = desc.get("jaw_before_close")
+    if not desc.get("ik_solved") or not desc["ok"]:
+        result["failure_reason"] = _descend_fail_reason(desc)
+        log_state(sim, "fail_descend", extra={"target": _xyz(grasp), "ee_err_mm": desc.get("ee_err_mm")})
+        return Fail("approach", result["failure_reason"])
+    log_state(
+        sim,
+        "004_descend",
+        extra={
+            "target": _xyz(grasp),
+            "ee_err_mm": round(desc["ee_err_mm"], 2),
+            "pre_close_contacts": desc["pre_close_contacts"],
+            "pre_close_gap_mm": round(desc["pre_close_gap_mm"], 2),
+            "queen_xy_mm": round(desc["queen_xy_mm"], 2),
+            "saturated": desc["saturated"],
+        },
+    )
+
+    if not queen_upright(sim.object_pose(tid)[1]):
+        result["failure_reason"] = "APPROACH_COLLISION"
+        log_state(sim, "fail_descend_knock")
+        return Fail("approach", result["failure_reason"], "pick")
+    m.plan_xy = plan_xy
+    m.grasp = grasp
+    m.hold = hold
+    m.clutter = clutter
+
+
+def _stage_close(m: Move):
+    """Close the jaws and check the grasp from gripper load."""
+    sim, result, tid, p, closed_g = m.sim, m.result, m.tid, m.p, m.closed_g
+    result["grasp_attempted"] = True
+    q_pre, _ = sim.object_pose(tid)
+    grip_peak = [0.0]
+    prev = sim.on_step
+
+    def _close_step():
+        if prev:
+            prev()
+        grip_peak[0] = max(grip_peak[0], abs(float(sim.actuator_forces()[sim._act["gripper"]])))
+
+    sim.on_step = _close_step
+    close_gripper(sim, closed_g, steps=int(p.get("close_steps", 220)))
+    sim.on_step = prev
+    q_post, qquat_post = sim.object_pose(tid)
+    result["close_shove_xy_mm"] = float(np.linalg.norm(q_post[:2] - q_pre[:2])) * 1000
+    result["pre_close_queen_disp_mm"] = float(
+        np.linalg.norm(q_pre[:2] - np.asarray(result["queen_start_xyz"][:2]))
+    ) * 1000
+    result["close_tilt_deg"] = queen_tilt_deg(qquat_post)
+    result["T_gripper_queen_close"] = gripper_object_transform(sim, tid)
+    result["gripper_peak_Nm"] = grip_peak[0]
+    result["gripper_saturated"] = grip_peak[0] >= 2.94 - 1e-6
+    log_state(
+        sim,
+        "005_gripper_closed",
+        extra={
+            "close_shove_xy_mm": round(result["close_shove_xy_mm"], 2),
+            "close_tilt_deg": round(result["close_tilt_deg"], 2),
+            "T_p_ee_mm": [round(v, 2) for v in result["T_gripper_queen_close"]["p_ee_mm"]],
+            "gripper_peak_Nm": round(grip_peak[0], 3),
+        },
+    )
+    result["grasp_acquired"] = grasp_acquired(sim, tid)
+    if not result["grasp_acquired"]:
+        result["failure_reason"] = "GRASP_MISS"
+        return Fail("close", result["failure_reason"], "pick")
+
+
+def _stage_carry(m: Move):
+    """Lift, transport and lower to just above the destination (plumb, else legacy)."""
+    sim, cfg, sc, result, tid, surface, p, dest, dest_xy, off_board, grasp, plan_xy, hold, clutter, lift_z, place_hover, closed_g, release_open = m.sim, m.cfg, m.sc, m.result, m.tid, m.surface, m.p, m.dest, m.dest_xy, m.off_board, m.grasp, m.plan_xy, m.hold, m.clutter, m.lift_z, m.place_hover, m.closed_g, m.release_open
+    g_close, _ = sim.site_pose(EE_SITE)
+    pick_xy = np.array([grasp[0], grasp[1]], dtype=np.float64)
+    q_gt, _ = sim.object_pose(tid)
+    # Held piece XY, not the pre-grasp plan. Close shove would otherwise
+    # carry through to dest if we kept object_xy = plan_xy.
+    object_xy = np.array(q_gt[:2], dtype=np.float64)
+    result["grasp_offset_error_mm"] = float(np.linalg.norm(q_gt[:2] - pick_xy)) * 1000
+    result["place_diag"] = {
+        "dest_xy_mm": [round(float(dest_xy[0]) * 1000, 1), round(float(dest_xy[1]) * 1000, 1)],
+        "plan_xy_mm": [round(float(plan_xy[0]) * 1000, 1), round(float(plan_xy[1]) * 1000, 1)],
+        "held_xy_after_close_mm": [round(float(q_gt[0]) * 1000, 1), round(float(q_gt[1]) * 1000, 1)],
+        "close_vs_plan_mm": round(float(np.linalg.norm(q_gt[:2] - plan_xy[:2])) * 1000, 1),
+        "T_ee_after_close_mm": [round(v, 1) for v in gripper_object_transform(sim, tid)["p_ee_mm"]],
+    }
+
+    obstacles = obstacle_bodies(sim, skip={tid})
+    mins = {"queen_mm": 1e9, "gripper_mm": 1e9, "camera_mm": 1e9}
+    prev_step = sim.on_step
+
+    n_transit = [0]
+
+    def _transit_hook():
+        phase = getattr(sim, "_pickup_phase", "") or ""
+        n_transit[0] += 1
+        if n_transit[0] % 4 == 0 and (
+            phase.startswith("007") or phase.startswith("fail_transport")
+        ):
+            cl = transit_clearances(sim, tid, obstacles)
+            for k in mins:
+                mins[k] = min(mins[k], cl[k])
+        hit = transit_nontarget_hit(sim, tid, obstacles)
+        if hit is None:
+            return
+        if result["transport_first_collision"] is None:
+            part = robot_part(hit.get("other"))
+            sq = square_of_body(sim, cfg, hit.get("body") or "")
+            result["transport_first_collision"] = {
+                **hit,
+                "phase": phase,
+                "robot_part": part,
+                "square": sq,
+                "piece": STARTING_AT.get(sq) if sq else None,
+            }
+        if phase.startswith("006") or phase == "fail_lift":
+            result["transport_contact_lift"] = True
+        elif phase.startswith("007") or phase.startswith("fail_transport"):
+            result["transport_contact_transit"] = True
+        elif phase.startswith("008") or phase == "fail_lower":
+            result["transport_contact_descend"] = True
+
+    def _on_step():
+        if prev_step:
+            prev_step()
+        _transit_hook()
+
+    sim.on_step = _on_step
+    plumbed = None
+    if not off_board and not sc.get("_from_nest") and sc.get("stop_after") != "lift":
+        plumbed = _plumb_transport(sim, tid, result, dest_xy, surface + place_hover, lift_z, obstacles)
+    if plumbed is not None and plumbed.get("failure_reason"):
+        result["failure_reason"] = plumbed["failure_reason"]
+        return Fail("carry", result["failure_reason"], "pick")
+    if plumbed is not None:
+        place = plumbed["place"]
+    else:
+        log_state(sim, "006_lift")
+        # Locked-wrist +Z from inside ~190 mm of the base is poorly tracked or
+        # unreachable. Push the lift target out to that radius (generic workspace
+        # floor, not a file/square table). Outside it, lift is still +Z.
+        radial = float(np.linalg.norm(np.asarray(g_close[:2], dtype=float) - _arm_base_xy(cfg)))
+        extra = max(0.0, _WORKSPACE_R_M - radial)
+        lift_xy = _outward_xy(g_close[:2], cfg, extra) if extra > 0.001 else np.asarray(g_close[:2], dtype=float)
+        if sc.get("_from_nest"):
+            nest_xy = np.asarray(nest_xyz(cfg)[:2], dtype=float)
+            away = np.asarray(g_close[:2], dtype=float) - nest_xy
+            n = float(np.linalg.norm(away))
+            if n > 1e-6:
+                lift_xy = np.asarray(g_close[:2], dtype=float) + away / n * 0.025
+        lift = [float(lift_xy[0]), float(lift_xy[1]), float(g_close[2] + lift_z)]
+        # Extract +Z with the close wrist so the pinch does not peel. Transit and
+        # lower then free wrist_flex to keep the piece world-upright.
+        extract = tuple(dict.fromkeys((*hold, "wrist_flex")))
+
+        def _lift(lock: tuple[str, ...], down: bool = False, x_axis=None) -> bool:
+            return move_lin(sim, lift, duration=1.2, physics=True, n_wp=8, lock_joints=lock, down=down, x_axis=x_axis)
+
+        # Vertical extract: the pinch is a hinge, so the piece hangs plumb; keeping
+        # gripper +X world-down while rising is what stops it peeling. A locked
+        # flex rotated the gripper up to 40 deg over a 30 mm lift near the base.
+        # If the grasp itself was not vertical (near-base squares, g/h files),
+        # freeze the *current* approach axis instead: re-verticalising while low
+        # swung the jaws 45 deg through the rank above (rook a1 knocked pawn a2).
+        _, R_g = sim.site_pose(EE_SITE)
+        grasp_axis = np.asarray(R_g, dtype=float).reshape(3, 3)[:, 0]
+        keep_axis = grasp_axis if gripper_tilt_deg(sim) > 6.0 else None
+        result["lift_axis_frozen"] = keep_axis is not None
+        lift_ok = _lift(tuple(hold), down=True, x_axis=keep_axis)
+        if not lift_ok:
+            result["lift_fallback"] = "locked_wrist"
+            lift_ok = _lift(extract)
+        if not lift_ok:
+            # With flex+roll locked only shoulder_lift/elbow remain, and near the
+            # folded (inner) edge of that 2R annulus a straight +Z is unreachable
+            # (rank-7 pawns: 6/32 board failures were exactly this). The pinch
+            # already holds the piece; a few degrees of flex beat abandoning it.
+            result["lift_fallback"] = "free_wrist"
+            lift_ok = _lift(tuple(hold))
+        if not lift_ok:
+            result["failure_reason"] = "IK_FAILURE"
+            log_state(sim, "fail_lift", extra={"target": lift})
+            return Fail("carry", result["failure_reason"])
+        for _ in range(40):
+            sim.step()
+        log_state(sim, "006_lift")
+
+        qpos, qquat = sim.object_pose(tid)
+        object_xy = np.array(qpos[:2], dtype=np.float64)
+        result["T_gripper_queen_lift"] = gripper_object_transform(sim, tid)
+        result["place_diag"]["held_xy_after_lift_mm"] = [round(float(qpos[0]) * 1000, 1), round(float(qpos[1]) * 1000, 1)]
+        result["place_diag"]["T_ee_after_lift_mm"] = [round(v, 1) for v in result["T_gripper_queen_lift"]["p_ee_mm"]]
+        clearance = float(p.get("lift_clearance", 0.04))
+        held = grasp_acquired(sim, tid)
+        lifted = qpos[2] > surface + clearance
+        result["max_queen_height_mm"] = float(qpos[2] * 1000)
+        result["lift_success"] = bool(lifted and held and queen_upright(qquat, tilt_max=0.7))
+        if not result["lift_success"]:
+            result["failure_reason"] = "LIFT_DROP" if result["grasp_acquired"] else "GRASP_MISS"
+            return Fail("carry", result["failure_reason"], "pick")
+        if sc.get("stop_after") == "lift":
+            return Stop("carry")
+
+        # A two-pad pinch is a hinge about the pinch axis. Once that axis has a
+        # vertical component (wrist at its flex limit on rank 7 + a roll chosen
+        # for clearance) the piece rolls on the pads and creeps out over the
+        # carry (e7e5 dropped after 60 mm). Roll the wrist so the axis is level;
+        # the piece only yaws.
+        # Leveling the pinch peels a short carry (g4→f3). Keep it for the
+        # long rank-7 transits it was added for.
+        carry_xy = float(np.linalg.norm(dest_xy[:2] - object_xy))
+        # Bowl dumps are a long carry, but orientation does not matter and
+        # leveling the pinch peels L-shaped men off the pads (Opera Bxf3).
+        if carry_xy > 0.08 and not off_board:
+            result["carry_level_roll_deg"] = round(_level_pinch_axis(sim), 2)
+        else:
+            result["carry_level_roll_deg"] = 0.0
+        if not grasp_acquired(sim, tid):
+            result["failure_reason"] = "LIFT_DROP"
+            result["lift_success"] = False
+            return Fail("carry", result["failure_reason"], "pick")
+
+        gpos, _ = sim.site_pose(EE_SITE)
+        # Translate the believed object XY onto dest. Using the EE grasp point here
+        # would park the jaws on dest and leave the piece short by grasp_xy_offset.
+        delta = dest_xy[:2] - object_xy
+        dest_ee = np.array([float(gpos[0] + delta[0]), float(gpos[1] + delta[1])])
+        _, standoff = _xy_floor(dest_ee, cfg)
+        result["transport_standoff"] = bool(standoff)
+        z_ee, derived = safe_transit_ee_z(sim, float(gpos[2]), tid, obstacles)
+        if off_board:
+            # Extra hover so a long bowl carry does not kiss the file it just left.
+            z_ee = max(float(z_ee), float(gpos[2]) + 0.03)
+        result["transit_z"] = z_ee
+        result["transit_z_derived"] = derived
+        result["transport_path"] = "over_board"
+        if z_ee > float(gpos[2]) + 0.004:
+            high = [float(gpos[0]), float(gpos[1]), z_ee]
+            raised = _carry_lin(sim, high, 0.8, 4, hold, extract)
+            if not raised:
+                out = _outward_xy(gpos[:2], cfg, 0.05)
+                high = [float(out[0]), float(out[1]), z_ee]
+                raised = _carry_lin(sim, high, 0.8, 4, hold, extract)
+            if not raised:
+                result["failure_reason"] = "IK_FAILURE"
+                log_state(sim, "fail_transport_raise", extra={"target": _xyz(high)})
+                return Fail("carry", result["failure_reason"])
+            gpos, _ = sim.site_pose(EE_SITE)
+            z_ee, derived = safe_transit_ee_z(sim, float(gpos[2]), tid, obstacles)
+            result["transit_z"] = float(gpos[2])
+            result["transit_z_derived"] = derived
+        carry = [float(gpos[0] + delta[0]), float(gpos[1] + delta[1]), float(gpos[2])]
+        xy_dist = float(np.linalg.norm(delta))
+        n_xy = max(10, int(np.ceil(xy_dist / 0.02)))
+        log_state(sim, "007_transport")
+        ok, how = _transport_to(sim, carry, hold, cfg, n_xy, max(1.5, 0.4 * n_xy), obstacles=clutter, skip={tid})
+        result["transport_detour"] = how
+        if not ok:
+            result["failure_reason"] = "IK_FAILURE"
+            log_state(sim, "fail_transport", extra={"target": _xyz(carry), "detour": how})
+            return Fail("carry", result["failure_reason"])
+        for _ in range(30):
+            sim.step()
+        qpos, qquat = sim.object_pose(tid)
+        over_dest = float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) < 0.04
+        # Near-base dests carry low (the 10 cm hover is dead). 40 mm clearance
+        # then called a held piece on dest a drop and scooped it into the cup.
+        held_over = bool(
+            grasp_acquired(sim, tid)
+            and (float(qpos[2]) > surface + 0.012 or over_dest)
+        )
+        result["transport_success"] = bool(held_over and over_dest and not result["transport_contact_transit"])
+        result["min_queen_piece_clearance_mm"] = None if mins["queen_mm"] >= 1e8 else float(mins["queen_mm"])
+        result["min_gripper_piece_clearance_mm"] = None if mins["gripper_mm"] >= 1e8 else float(mins["gripper_mm"])
+        result["min_camera_piece_clearance_mm"] = None if mins["camera_mm"] >= 1e8 else float(mins["camera_mm"])
+        log_state(
+            sim,
+            "007_transport",
+            extra={
+                "target": _xyz(carry),
+                "dest": dest,
+                "path": result["transport_path"],
+                "detour": result.get("transport_detour"),
+                "transit_z": result.get("transit_z"),
+            },
+        )
+        if not result["transport_success"]:
+            result["failure_reason"] = "TRANSPORT_COLLISION" if result["transport_contact_transit"] else "TRANSPORT_DROP"
+            return Fail("carry", result["failure_reason"], "pick")
+
+        gpos, _ = sim.site_pose(EE_SITE)
+        q_hold, _ = sim.object_pose(tid)
+        shift = dest_xy[:2] - q_hold[:2]
+        result["place_diag"]["piece_xy_before_lower_mm"] = [
+            round(float(q_hold[0]) * 1000, 1),
+            round(float(q_hold[1]) * 1000, 1),
+        ]
+        result["place_diag"]["piece_err_before_lower_mm"] = round(
+            float(np.hypot(q_hold[0] - dest_xy[0], q_hold[1] - dest_xy[1])) * 1000, 1
+        )
+        result["place_diag"]["ee_xy_before_lower_mm"] = [
+            round(float(gpos[0]) * 1000, 1),
+            round(float(gpos[1]) * 1000, 1),
+        ]
+        result["place_diag"]["T_ee_before_lower_mm"] = [
+            round(v, 1) for v in gripper_object_transform(sim, tid)["p_ee_mm"]
+        ]
+        # Aim held piece XY at dest, then lower vertically. Combined diagonal
+        # lower would drag the piece by the leftover grasp/carry offset.
+        place_z = float(g_close[2]) + place_hover
+        standoff = bool(result.get("transport_standoff"))
+        # Least-tilted reachable pinch at this hover, then lock and translate.
+        # Re-solving vertical *during* the lower swings the jaws (f1c4). Far
+        # squares cannot be truly vertical; this is the same compromise the
+        # real wrist will have to make.
+        gpos, _ = sim.site_pose(EE_SITE)
+        hover = [float(gpos[0]), float(gpos[1]), float(gpos[2])]
+        vert_place = _vertical_wrist(sim, hover)
+        if vert_place is not None:
+            _pitch_holding(sim, vert_place["wrist_flex"], closed_g, tid)
+            result["place_hover_tilt_deg"] = round(vert_place["tilt_deg"], 2)
+        _, R_place = sim.site_pose(EE_SITE)
+        place_axis = np.asarray(R_place, dtype=float).reshape(3, 3)[:, 0]
+        keep_place = place_axis if gripper_tilt_deg(sim) > 6.0 else None
+        # Destination clearance: which side the moving jaw faces (roll, level
+        # pinch either way) and how wide to open without slapping a neighbour.
+        place_plan = _plan_place(sim, tid, dest_xy, place_z, hold, release_open, x_axis=keep_place)
+        result["place_plan"] = place_plan
+        d_roll = abs(float(place_plan["roll"]) - float(sim.qpos()["wrist_roll"]))
+        if 0.05 < d_roll < 1.0:
+            _roll_holding(sim, float(place_plan["roll"]))
+        # If the grasp was not already world-down, freeze that axis so the jaws
+        # translate instead of swinging the piece onto its side (f1c4).
+        vertical_place = _lower_vertical(sim, tid, dest_xy, place_z, hold, result, x_axis=keep_place)
+        if vertical_place:
+            place = vertical_place
+        else:
+            align = [float(gpos[0] + shift[0]), float(gpos[1] + shift[1]), float(gpos[2])]
+            place = [align[0], align[1], place_z]
+            if float(np.hypot(shift[0], shift[1])) > 0.001:
+                if _carry_lin(sim, align, 0.5, 6, hold, extract):
+                    gpos, _ = sim.site_pose(EE_SITE)
+                    q_hold, _ = sim.object_pose(tid)
+                    shift = dest_xy[:2] - q_hold[:2]
+                    place = [
+                        float(gpos[0] + shift[0]),
+                        float(gpos[1] + shift[1]),
+                        place_z,
+                    ]
+            result["place_diag"]["lower_target_xy_mm"] = [round(place[0] * 1000, 1), round(place[1] * 1000, 1)]
+            lower_ok = _carry_lin(sim, place, 1.2, 12, hold, extract)
+            if not lower_ok:
+                result["failure_reason"] = "IK_FAILURE"
+                result["ik_fail_phase"] = "008_lower"
+                log_state(sim, "fail_lower", extra={"target": _xyz(place)})
+                return Fail("carry", result["failure_reason"])
+        q_lo, _ = sim.object_pose(tid)
+        off = float(np.hypot(q_lo[0] - dest_xy[0], q_lo[1] - dest_xy[1]))
+        if standoff and 0.012 < off < 0.022:
+            gpos, _ = sim.site_pose(EE_SITE)
+            shift = dest_xy[:2] - q_lo[:2]
+            inch = [float(gpos[0] + shift[0]), float(gpos[1] + shift[1]), float(gpos[2])]
+            if _carry_lin(sim, inch, 0.8, 8, hold, extract):
+                place = inch
+                result["place_diag"]["standoff_inch"] = True
+    log_state(sim, "008_lower", extra={"target": _xyz(place)})
+
+
+def _stage_release(m: Move):
+    """Open to the release aperture at the place pose; record where the piece is left."""
+    sim, result, tid, surface, p, dest_xy, off_board, release_open = m.sim, m.result, m.tid, m.surface, m.p, m.dest_xy, m.off_board, m.release_open
+    q_lo, _ = sim.object_pose(tid)
+    g_lo, r_lo = sim.site_pose(EE_SITE)
+    result["place_diag"]["piece_xy_after_lower_mm"] = [
+        round(float(q_lo[0]) * 1000, 1),
+        round(float(q_lo[1]) * 1000, 1),
+    ]
+    result["place_diag"]["piece_err_after_lower_mm"] = round(
+        float(np.hypot(q_lo[0] - dest_xy[0], q_lo[1] - dest_xy[1])) * 1000, 1
+    )
+    result["place_diag"]["ee_xy_after_lower_mm"] = [
+        round(float(g_lo[0]) * 1000, 1),
+        round(float(g_lo[1]) * 1000, 1),
+    ]
+    result["place_diag"]["ee_x_z_after_lower"] = round(float(r_lo[2, 0]), 3)
+    result["place_diag"]["T_ee_after_lower_mm"] = [
+        round(v, 1) for v in gripper_object_transform(sim, tid)["p_ee_mm"]
+    ]
+
+    _, g_hi = sim.joint_limits()["gripper"]
+    # Narrower than approach open: a full 0.60 swing slaps neighbors
+    # once the piece is already on the square.
+    release_g = min(float(g_hi), float(release_open))
+    open_gripper(sim, release_g, steps=100)
+    settle_queen(sim, steps=16)
+    _belief_set_down(sim, tid, surface)
+    result["release_after_open"] = release_snapshot(sim, tid)
+    q_open, _ = sim.object_pose(tid)
+    result["place_diag"]["piece_xy_after_open_mm"] = [
+        round(float(q_open[0]) * 1000, 1),
+        round(float(q_open[1]) * 1000, 1),
+    ]
+    result["place_diag"]["piece_err_after_open_mm"] = round(
+        float(np.hypot(q_open[0] - dest_xy[0], q_open[1] - dest_xy[1])) * 1000, 1
+    )
+    result["place_diag"]["still_held_after_open"] = bool(grasp_acquired(sim, tid))
+    result["place_diag"]["piece_z_after_open_mm"] = round(float(q_open[2]) * 1000, 1)
+    result["place_diag"]["release_gripper"] = round(release_g, 3)
+
+    wrist = ("wrist_flex", "wrist_roll")
+    release_lift = float(p.get("release_lift_z", 0.08))
+    result["place_diag"]["airborne_after_open"] = float(q_open[2]) > surface + 0.012
+    result["release_after_lift"] = release_snapshot(sim, tid)
+
+    q_rel, qquat_rel = sim.object_pose(tid)
+    result["release_position_error_mm"] = float(np.hypot(q_rel[0] - dest_xy[0], q_rel[1] - dest_xy[1])) * 1000
+    result["place_diag"]["release_xy_mm"] = [
+        round(float(q_rel[0]) * 1000, 1),
+        round(float(q_rel[1]) * 1000, 1),
+    ]
+    result["place_diag"]["release_err_mm"] = round(result["release_position_error_mm"], 1)
+    still_held = bool(grasp_acquired(sim, tid) and float(q_rel[2]) > surface + 0.012)
+    if off_board:
+        seated = bowl_contains(q_rel, dest_xy)
+        upright = True
+    else:
+        seated = object_on_board(sim, surface, object_id=tid)
+        result["place_diag"]["tilt_deg"] = round(float(queen_tilt_deg(qquat_rel)), 1)
+        upright = queen_upright(qquat_rel, tilt_max=0.5)
+    result["place_diag"]["still_held"] = still_held
+    result["place_diag"]["jaw_contact"] = bool(grasp_acquired(sim, tid))
+    result["place_diag"]["seated"] = bool(seated)
+    result["place_diag"]["upright"] = bool(upright)
+    result["place_diag"]["piece_z_mm"] = round(float(q_rel[2]) * 1000, 1)
+    result["place_diag"]["off_board"] = bool(off_board)
+    log_state(sim, "009_release", extra={"release_err_mm": round(result["release_position_error_mm"], 2)})
+    m.q_rel = q_rel
+    m.seated = seated
+    m.upright = upright
+    m.release_lift = release_lift
+    m.wrist = wrist
+
+
+def _stage_retreat(m: Move):
+    """Back the pads off the piece and rise clear."""
+    sim, cfg, result, tid, dest_xy, off_board, q_rel, seated, upright, release_lift, wrist = m.sim, m.cfg, m.result, m.tid, m.dest_xy, m.off_board, m.q_rel, m.seated, m.upright, m.release_lift, m.wrist
+    gpos, _ = sim.site_pose(EE_SITE)
+    touching = bool(grasp_acquired(sim, tid))
+    result["place_diag"]["jaw_contact_before_retreat"] = touching
+    z_up = max(
+        float(gpos[2]) + release_lift,
+        float(result.get("transit_z") or 0.0),
+        _transit_z(sim, cfg, skip={tid}),
+    )
+    high = [float(gpos[0]), float(gpos[1]), z_up]
+    retreated = True
+    near_dest = float(np.hypot(q_rel[0] - dest_xy[0], q_rel[1] - dest_xy[1])) < 0.028
+    straight_up = None
+    if not off_board:
+        spec = PIECES.get(body_kind(tid) or tid) or {}
+        jaw_clear = float(spec.get("height", 0.055)) - float(spec.get("preferred_grasp_height", 0.01)) + 0.01
+        avoid = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
+        bearing = _hand_bears_on(sim, tid)
+        result["place_diag"]["hand_bears_on_piece"] = bearing
+        centred = {"ok": False, "why": "bearing"} if bearing else _centred_retreat(sim, tid, avoid, z_up, jaw_clear)
+        result["place_diag"]["retreat_centred"] = centred
+        if centred["ok"]:
+            straight_up = []
+            if not centred["high"]:
+                g_top, _ = sim.site_pose(EE_SITE)
+                _safe_lin(sim, [float(g_top[0]), float(g_top[1]), z_up], cfg, wrist,
+                          obstacles=obstacle_bodies(sim, skip={tid}), skip={tid})
+        else:
+            straight_up = plumb.retreat(sim, avoid, z_up, jaw_clear, touching=lambda: bystander_contact(sim, [tid]))
+        result["place_diag"]["retreat_straight"] = straight_up is not None or getattr(sim, "plumb_fail", None)
+    if straight_up is not None:
+        retreated = True
+    elif (seated or (upright and near_dest)) and not off_board:
+        # Get the pads off the lip, then rise. Skipping that check (or
+        # `_safe_lin(skip=tid)`) combs the crown and knocks the piece.
+        # "Seated" needs board contact; a man still on the pads is upright
+        # on dest and must take this path, not a floored +Z.
+        leave = _clear_then_rise(sim, cfg, tid, z_min=z_up)
+        result["place_diag"]["pad_clear_mm"] = leave.get("pad_clear_mm", 0.0)
+        result["place_diag"]["retreat_cleared"] = bool(leave.get("cleared"))
+        result["place_diag"]["short_retreat"] = not bool(leave.get("rose"))
+        retreated = True
+    elif float(gpos[2]) < z_up - 0.01:
+        retreated = _safe_lin(
+            sim, high, cfg, wrist, obstacles=obstacle_bodies(sim, skip={tid}), skip={tid}
+        )
+    settle_queen(sim, steps=48)
+    m.retreated = retreated
+    m.high = high
+
+
+def _stage_confirm(m: Move):
+    """Placed? The robot's own check (wrist look at the destination), then the final phase log."""
+    sim, cfg, result, tid, surface, dest, dest_xy, off_board, retreated, high = m.sim, m.cfg, m.result, m.tid, m.surface, m.dest, m.dest_xy, m.off_board, m.retreated, m.high
+    still_held = bool(grasp_acquired(sim, tid) and float(sim.object_pose(tid)[0][2]) > surface + 0.012)
+    result["placement_success"] = _placed(sim, cfg, tid, dest, dest_xy, surface, off_board) and not still_held
+    result["retreat_success"] = bool(retreated)
+    if not retreated:
+        result["ik_fail_phase"] = "010_final"
+        log_state(sim, "fail_retreat", extra={"target": _xyz(high)})
+    log_state(sim, "010_final")
+
+    if not result["placement_success"]:
+        result["failure_reason"] = "RELEASE_FAILURE" if still_held else "PLACEMENT_POSITION_ERROR"
+        return Fail("confirm", result["failure_reason"], "place")
+
+
 def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:
+    """Run one move through the stage pipeline (`stages.resolve(cfg)`); world-side scoring stays here."""
     sc = dict(scenario or {})
     p = pickup_cfg(cfg)
     tid = sc.get("target_id", "queen")
@@ -3125,787 +3916,49 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     result["spawn_xyz"] = _xyz(spawn)
     if sc.get("seed_home", sc.get("reset_board", True)):
         seed_vertical(sim, cfg)
-    gpos, _ = sim.site_pose(EE_SITE)
-    hugging = _jaws_on_piece(sim)
-    sim._pickup_phase = "000_unhook"
-    if hugging:
-        # Pads still wrap the last man. Open to release, then the same
-        # clear-then-rise as after place — a raw +Z here combs the lip.
-        wrap = _piece_in_jaws(sim)
-        open_gripper(sim, release_open, steps=80)
-        settle_queen(sim, steps=24)
-        if wrap:
-            _clear_then_rise(sim, cfg, wrap, z_min=0.11)
-        else:
-            _js_raise_ee(sim, z_min=0.11)
-        open_gripper(sim, open_g, steps=40)
-    elif float(gpos[2]) < 0.09:
-        # Clear of the last man: step out, then up.
-        away = _outward_xy(gpos[:2], cfg, 0.035)
-        wrist = ("wrist_flex", "wrist_roll")
-        others = obstacle_bodies(sim, skip={tid})
-        _safe_lin(
-            sim,
-            [float(away[0]), float(away[1]), float(gpos[2])],
-            cfg,
-            wrist,
-            obstacles=others,
-            skip={tid},
-            duration=0.45,
-        )
-        _js_raise_ee(sim, z_min=0.11)
-        open_gripper(sim, open_g, steps=40)
-    else:
-        open_gripper(sim, open_g, steps=40)
-    settle_queen(sim, steps=48)
+    m = Move(sim, cfg, sc, result)
+    for k, v in dict(p=p, tid=tid, source=source, dest=dest, use_vision=use_vision, geom=geom, surface=surface,
+                     open_g=open_g, release_open=release_open, closed_g=closed_g, pre_z=pre_z, grasp_z=grasp_z,
+                     lift_z=lift_z, place_hover=place_hover, off_board=off_board, dest_xy=dest_xy).items():
+        setattr(m, k, v)
+    P = stages.resolve(cfg)
+
+    def _end(out):
+        if isinstance(out, Stop):
+            result["success"] = True
+            result["failure_reason"] = None
+            return _done()
+        again = None
+        if out.retry == "pick":
+            again = _after_pick_fail(sim, cfg, use_vision, sc, result, tid, surface, release_open)
+        elif out.retry == "place":
+            again = _after_place_fail(sim, cfg, use_vision, sc, result, tid, surface, release_open)
+        return again if again is not None else _done()
+
+    P["retreat"].unhook(m)
     _collateral_snapshot()
 
     actual, _ = W.object_pose(tid)
     result["actual_start_pose"] = actual.tolist()
     result["queen_start_xyz"] = actual.tolist()
     log_state(sim, "001_initial", extra={"spawn": _xyz(spawn)})
+    m.actual = actual
 
-    if sc.get("_from_nest"):
-        # Nest is off the commanded square; do not hover the empty source.
-        queen_xyz, _ = sim.object_pose(tid)
-        nest_z = float(nest_xyz(cfg)[2])
-        grasp_z = max(0.030, float(queen_xyz[2]) - surface + 0.022, nest_z - surface + 0.008)
-        log_state(sim, "002_observe", extra={"from_nest": True, "target": _xyz(queen_xyz)})
-    elif use_vision:
-        prior = square_to_world(source, cfg, z=surface)
-        look = _reach_observe(sim, cfg, prior, tid)
-        if look is None:
-            result["failure_reason"] = "IK_NO_SOLUTION"
-            result["ee_requested"] = _xyz(prior)
-            log_state(sim, "fail_observe", extra={"target": result["ee_requested"]})
-            again = _after_pick_fail(
-                sim, cfg, use_vision, sc, result, tid, surface, release_open
-            )
-            return again if again is not None else _done()
-        log_state(sim, "002_observe", extra={"target": _xyz(look)})
-        queen_xyz = locate_queen(sim, cfg, result, source)
-        if queen_xyz is None:
-            # Commanded square is already the prior. Empty cloud on rank 8
-            # (b8c6 after g1f3) should not abort the move.
-            queen_xyz = prior
-            result["queen_detected"] = True
-            result["perception_fallback"] = "square"
-        else:
-            result["queen_detected"] = True
-    else:
-        queen_xyz, _ = sim.object_pose(tid)
-        observe = _reach_observe(sim, cfg, queen_xyz, tid)
-        if observe is None:
-            result["failure_reason"] = "IK_NO_SOLUTION"
-            result["ee_requested"] = _xyz(queen_xyz)
-            log_state(sim, "fail_observe", extra={"target": result["ee_requested"]})
-            again = _after_pick_fail(
-                sim, cfg, use_vision, sc, result, tid, surface, release_open
-            )
-            return again if again is not None else _done()
-        log_state(sim, "002_observe", extra={"target": _xyz(observe)})
-        queen_xyz, _ = sim.object_pose(tid)
-    plan_xy = perceived_xy(sim, queen_xyz)
-    # Vertical pinch: put the wrist where gripper +X is world-down at the
-    # grasp point before anything downstream snapshots the heading. Without
-    # this the observe pose's 30-50 deg flex was inherited (approach planner
-    # locks flex at its current value) and the fixed jaw tipped pieces over on
-    # close. Files a-f reach <3 deg; g/h get the least-tilted pose available.
-    vert = _vertical_wrist(sim, [plan_xy[0], plan_xy[1], surface + grasp_z])
-    if vert is not None:
-        result["vertical_flex"] = round(vert["wrist_flex"], 4)
-        result["vertical_tilt_deg"] = round(vert["tilt_deg"], 2)
-        _pitch_in_place(sim, vert["wrist_flex"])
-    grasp_xy = _seeded_grasp_xy(sim, cfg, plan_xy, geom, surface + grasp_z)
-    pre = find_pregrasp_pose(sim, cfg, grasp_xy)
-    if pre is None:
-        result["failure_reason"] = "IK_NO_SOLUTION"
-        result["ee_requested"] = _xyz([grasp_xy[0], grasp_xy[1], surface + pre_z])
-        log_state(sim, "fail_pregrasp", extra={"target": result["ee_requested"]})
-        again = _after_pick_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-    result["transport_path"] = "straight"
-    clutter = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
-    result["occupied_neighbors"] = sorted(clutter)
-    grasp_plan = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
-
-    def _grasp_for_roll(roll: float | None) -> list[float]:
-        # The pinch axis rotates with wrist roll, so the fixed-pad shift does too.
-        xy = _grasp_xy_for_roll(sim, plan_xy, surface + grasp_z, geom, roll)
-        return [xy[0], xy[1], surface + grasp_z]
-
-    def _plan(pre_seed, grasp_seed):
-        return plan_approach(
-            sim,
-            pre_seed,
-            grasp_seed,
-            open_g,
-            clutter,
-            source=None if sc.get("_from_nest") else source,
-            cfg=cfg,
-            scenario=sc,
-            grasp_for_roll=_grasp_for_roll,
-            target=tid,
-        )
-
-    approach = _plan(pre, grasp_plan)
-    if approach.get("pre"):
-        pre = list(approach["pre"])
-    if approach.get("grasp"):
-        grasp_plan = list(approach["grasp"])
-        grasp_xy = grasp_plan[:2]
-    _plan_keys = ("ok", "roll", "gripper", "n_wp", "tried", "reachable", "rank", "reason", "pre_offset_xy", "block", "statuses", "degraded", "min_gap_mm")
-    result["approach_plan"] = {k: approach.get(k) for k in _plan_keys}
-    if not approach["ok"]:
-        result["failure_reason"] = (
-            "NO_COLLISION_FREE_APPROACH" if approach.get("reachable") else "IK_NO_SOLUTION"
-        )
-        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre), "approach": result["approach_plan"]})
-        again = _after_pick_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-    lock: tuple[str, ...] = tuple(approach["lock_joints"])
-    # After close, lock wrist_roll so the pinch does not yaw around the stem.
-    # Leave wrist_flex free: carry IK pulls gripper +X toward world -Z so the
-    # piece stays upright as the shoulder/elbow reach across the board.
-    hold: tuple[str, ...] = tuple(
-        j for j in dict.fromkeys((*lock, "wrist_roll")) if j != "wrist_flex"
-    )
-    pickup_clear = bool(clutter) or approach["n_wp"] > 1
-    # Verified joint path for the descend (pre -> grasp); replayed verbatim.
-    descend_path = approach.get("path_q") if clutter else None
-    # Vertical pinch: pre, descend and grasp are all solved with gripper +X
-    # world-down (solve_ik_down); flex is a free joint the solver uses to keep
-    # the approach vertical while shoulder/elbow move. Roll stays locked when
-    # the planner chose one for neighbor clearance.
-    grasp_lock = tuple(j for j in lock if j != "wrist_flex")
-
-    def _apply_approach(plan: dict) -> bool:
-        """Set the planned roll + aperture, then bring the EE to its pregrasp."""
-        if plan["roll"] is not None:
-            _roll_in_place(sim, float(plan["roll"]))
-            result["approach_roll_err"] = round(abs(float(sim.qpos()["wrist_roll"]) - float(plan["roll"])), 3)
-        g_ap = float(plan["gripper"])
-        result["approach_gripper"] = None if abs(g_ap - open_g) < 0.02 else g_ap
-        if abs(g_ap - float(sim.qpos()["gripper"])) > 0.01:
-            open_gripper(sim, g_ap, steps=40)
-        # A straight line to the pregrasp from the last square (g4) sweeps the
-        # file and knocks whoever is in the way (fallen Nf3, then the e5 pawn
-        # → APPROACH_COLLISION). Hover over the target first so the pregrasp
-        # move is a short local drop.
-        gpos, _ = sim.site_pose(EE_SITE)
-        pre_xyz = np.asarray(plan["pre"], dtype=float)
-        if float(np.hypot(pre_xyz[0] - gpos[0], pre_xyz[1] - gpos[1])) > 0.05:
-            hover_z = max(float(pre_xyz[2]), _transit_z(sim, cfg, skip={tid}))
-            hover = [float(pre_xyz[0]), float(pre_xyz[1]), hover_z]
-            _safe_lin(
-                sim,
-                hover,
-                cfg,
-                ("wrist_flex", "wrist_roll"),
-                obstacles=clutter,
-                skip={tid},
-            )
-        if pickup_clear:
-            return move_lin(sim, plan["pre"], duration=1.0, physics=True, n_wp=6, lock_joints=grasp_lock, down=True)
-        return move_ik(sim, plan["pre"], duration=1.0, physics=True, lock_joints=grasp_lock, down=True)
-
-    if not _apply_approach(approach):
-        result["failure_reason"] = "IK_NO_SOLUTION"
-        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre)})
-        again = _after_pick_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-    result["pregrasp_reached"] = True
-    log_state(sim, "003_pregrasp", extra={"target": _xyz(pre), "approach_gripper": result.get("approach_gripper"), "approach_roll": approach.get("roll")})
-
-    if not queen_upright(sim.object_pose(tid)[1]):
-        result["failure_reason"] = "APPROACH_COLLISION"
-        log_state(sim, "fail_pregrasp_knock")
-        again = _after_pick_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-
-    if use_vision and not sc.get("_from_nest"):
-        refined = locate_queen(sim, cfg, result, source)
-        if refined is not None:
-            queen_xyz = refined
-            plan_xy = perceived_xy(sim, queen_xyz)
-            grasp_xy = _grasp_xy_for_roll(sim, plan_xy, surface + grasp_z, geom, approach.get("roll"))
-            # The plan was verified against the long-range estimate. Re-check
-            # the chosen approach on the refined grasp; if the jaws would now
-            # clip a bystander, re-plan from here before going down.
-            if clutter:
-                status = verify_approach(
-                    sim, pre, [grasp_xy[0], grasp_xy[1], surface + grasp_z], clutter,
-                    float(approach["gripper"]), approach.get("roll"), lock, cfg=cfg, target=tid,
-                    margin=HARD_MARGIN if approach.get("degraded") else None,
-                )
-                result["approach_reverify"] = status
-                if status == "ok":
-                    descend_path = getattr(sim, "_cand_path", None) or descend_path
-                if status != "ok":
-                    again = _plan(pre, [grasp_xy[0], grasp_xy[1], surface + grasp_z])
-                    result["approach_replan"] = {k: again.get(k) for k in _plan_keys}
-                    if not again["ok"]:
-                        result["failure_reason"] = (
-                            "NO_COLLISION_FREE_APPROACH" if again.get("reachable") else "IK_NO_SOLUTION"
-                        )
-                        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre), "approach": result["approach_replan"]})
-                        return _done()
-                    approach = again
-                    lock = tuple(approach["lock_joints"])
-                    hold = tuple(j for j in dict.fromkeys((*lock, "wrist_roll")) if j != "wrist_flex")
-                    grasp_lock = tuple(j for j in lock if j != "wrist_flex")
-                    pre = list(approach["pre"])
-                    grasp_xy = list(approach["grasp"][:2])
-                    descend_path = approach.get("path_q")
-                    result["approach_plan"] = {k: approach.get(k) for k in _plan_keys}
-                    if not _apply_approach(approach):
-                        result["failure_reason"] = "IK_NO_SOLUTION"
-                        log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre)})
-                        return _done()
-                    log_state(sim, "003_pregrasp", extra={"target": _xyz(pre), "replanned": True})
-
-    result["pose_used_for_grasp"] = [float(plan_xy[0]), float(plan_xy[1]), float(np.asarray(queen_xyz)[2])]
-    result["perception_error"] = [
-        float((plan_xy[0] - actual[0]) * 1000.0),
-        float((plan_xy[1] - actual[1]) * 1000.0),
-    ]
-    grasp = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
-    result["ee_requested"] = _xyz(grasp)
-    result["transport_path"] = "straight"
-    column = _descend_column(sim, grasp, grasp_lock)
-    result["descend_column"] = column is not None or getattr(sim, "plumb_fail", None)
-    desc = physical_descend(
-        sim, grasp, duration=1.2, lock_joints=grasp_lock, path_q=column or descend_path
-    )
-    # Guard tripped: a robot link touched a bystander on the way down.
-    if desc.get("aborted"):
-        result["descend_aborted"] = desc["aborted"]
-        move_lin(sim, pre, duration=0.6, physics=True, n_wp=4, lock_joints=grasp_lock, down=True)
-        result["failure_reason"] = "APPROACH_COLLISION"
-        log_state(sim, "fail_descend", extra={"target": _xyz(grasp), "aborted": desc["aborted"]})
-        return _done()
-    result["descend"] = {k: v for k, v in desc.items() if k not in ("samples", "ik_jaw", "jaw_before_close")}
-    result["ik_solved"] = bool(desc.get("ik_solved"))
-    result["ik_residual_mm"] = desc.get("ik_residual_mm")
-    result["ee_actual"] = desc.get("ee_actual")
-    result["ee_err_mm"] = desc.get("ee_err_mm")
-    result["approach_reached"] = bool(desc.get("approach_reached"))
-    result["joint_limit_margin_rad"] = desc.get("joint_limit_margin_rad")
-    result["pre_close_contacts"] = desc.get("pre_close_contacts", 0)
-    result["pre_close_gap_mm"] = desc.get("pre_close_gap_mm")
-    result["first_contact_jaw"] = desc.get("first_contact_jaw")
-    result["ik_jaw"] = desc.get("ik_jaw")
-    result["jaw_before_close"] = desc.get("jaw_before_close")
-    if not desc.get("ik_solved") or not desc["ok"]:
-        result["failure_reason"] = _descend_fail_reason(desc)
-        log_state(sim, "fail_descend", extra={"target": _xyz(grasp), "ee_err_mm": desc.get("ee_err_mm")})
-        return _done()
-    log_state(
-        sim,
-        "004_descend",
-        extra={
-            "target": _xyz(grasp),
-            "ee_err_mm": round(desc["ee_err_mm"], 2),
-            "pre_close_contacts": desc["pre_close_contacts"],
-            "pre_close_gap_mm": round(desc["pre_close_gap_mm"], 2),
-            "queen_xy_mm": round(desc["queen_xy_mm"], 2),
-            "saturated": desc["saturated"],
-        },
-    )
-
-    if not queen_upright(sim.object_pose(tid)[1]):
-        result["failure_reason"] = "APPROACH_COLLISION"
-        log_state(sim, "fail_descend_knock")
-        again = _after_pick_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-
-    result["grasp_attempted"] = True
-    q_pre, _ = sim.object_pose(tid)
-    grip_peak = [0.0]
-    prev = sim.on_step
-
-    def _close_step():
-        if prev:
-            prev()
-        grip_peak[0] = max(grip_peak[0], abs(float(sim.actuator_forces()[sim._act["gripper"]])))
-
-    sim.on_step = _close_step
-    close_gripper(sim, closed_g, steps=int(p.get("close_steps", 220)))
-    sim.on_step = prev
-    q_post, qquat_post = sim.object_pose(tid)
-    result["close_shove_xy_mm"] = float(np.linalg.norm(q_post[:2] - q_pre[:2])) * 1000
-    result["pre_close_queen_disp_mm"] = float(
-        np.linalg.norm(q_pre[:2] - np.asarray(result["queen_start_xyz"][:2]))
-    ) * 1000
-    result["close_tilt_deg"] = queen_tilt_deg(qquat_post)
-    result["T_gripper_queen_close"] = gripper_object_transform(sim, tid)
-    result["gripper_peak_Nm"] = grip_peak[0]
-    result["gripper_saturated"] = grip_peak[0] >= 2.94 - 1e-6
-    log_state(
-        sim,
-        "005_gripper_closed",
-        extra={
-            "close_shove_xy_mm": round(result["close_shove_xy_mm"], 2),
-            "close_tilt_deg": round(result["close_tilt_deg"], 2),
-            "T_p_ee_mm": [round(v, 2) for v in result["T_gripper_queen_close"]["p_ee_mm"]],
-            "gripper_peak_Nm": round(grip_peak[0], 3),
-        },
-    )
-    result["grasp_acquired"] = grasp_acquired(sim, tid)
-    if not result["grasp_acquired"]:
-        result["failure_reason"] = "GRASP_MISS"
-        again = _after_pick_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
-
-    g_close, _ = sim.site_pose(EE_SITE)
-    pick_xy = np.array([grasp[0], grasp[1]], dtype=np.float64)
-    q_gt, _ = sim.object_pose(tid)
-    # Held piece XY, not the pre-grasp plan. Close shove would otherwise
-    # carry through to dest if we kept object_xy = plan_xy.
-    object_xy = np.array(q_gt[:2], dtype=np.float64)
-    result["grasp_offset_error_mm"] = float(np.linalg.norm(q_gt[:2] - pick_xy)) * 1000
-    result["place_diag"] = {
-        "dest_xy_mm": [round(float(dest_xy[0]) * 1000, 1), round(float(dest_xy[1]) * 1000, 1)],
-        "plan_xy_mm": [round(float(plan_xy[0]) * 1000, 1), round(float(plan_xy[1]) * 1000, 1)],
-        "held_xy_after_close_mm": [round(float(q_gt[0]) * 1000, 1), round(float(q_gt[1]) * 1000, 1)],
-        "close_vs_plan_mm": round(float(np.linalg.norm(q_gt[:2] - plan_xy[:2])) * 1000, 1),
-        "T_ee_after_close_mm": [round(v, 1) for v in gripper_object_transform(sim, tid)["p_ee_mm"]],
-    }
-
-    obstacles = obstacle_bodies(sim, skip={tid})
-    mins = {"queen_mm": 1e9, "gripper_mm": 1e9, "camera_mm": 1e9}
-    prev_step = sim.on_step
-
-    n_transit = [0]
-
-    def _transit_hook():
-        phase = getattr(sim, "_pickup_phase", "") or ""
-        n_transit[0] += 1
-        if n_transit[0] % 4 == 0 and (
-            phase.startswith("007") or phase.startswith("fail_transport")
-        ):
-            cl = transit_clearances(sim, tid, obstacles)
-            for k in mins:
-                mins[k] = min(mins[k], cl[k])
-        hit = transit_nontarget_hit(sim, tid, obstacles)
-        if hit is None:
-            return
-        if result["transport_first_collision"] is None:
-            part = robot_part(hit.get("other"))
-            sq = square_of_body(sim, cfg, hit.get("body") or "")
-            result["transport_first_collision"] = {
-                **hit,
-                "phase": phase,
-                "robot_part": part,
-                "square": sq,
-                "piece": STARTING_AT.get(sq) if sq else None,
-            }
-        if phase.startswith("006") or phase == "fail_lift":
-            result["transport_contact_lift"] = True
-        elif phase.startswith("007") or phase.startswith("fail_transport"):
-            result["transport_contact_transit"] = True
-        elif phase.startswith("008") or phase == "fail_lower":
-            result["transport_contact_descend"] = True
-
-    def _on_step():
-        if prev_step:
-            prev_step()
-        _transit_hook()
-
-    sim.on_step = _on_step
-    plumbed = None
-    if not off_board and not sc.get("_from_nest") and sc.get("stop_after") != "lift":
-        plumbed = _plumb_transport(sim, tid, result, dest_xy, surface + place_hover, lift_z, obstacles)
-    if plumbed is not None and plumbed.get("failure_reason"):
-        result["failure_reason"] = plumbed["failure_reason"]
-        again = _after_pick_fail(sim, cfg, use_vision, sc, result, tid, surface, release_open)
-        return again if again is not None else _done()
-    if plumbed is not None:
-        place = plumbed["place"]
-    else:
-        log_state(sim, "006_lift")
-        # Locked-wrist +Z from inside ~190 mm of the base is poorly tracked or
-        # unreachable. Push the lift target out to that radius (generic workspace
-        # floor, not a file/square table). Outside it, lift is still +Z.
-        radial = float(np.linalg.norm(np.asarray(g_close[:2], dtype=float) - _arm_base_xy(cfg)))
-        extra = max(0.0, _WORKSPACE_R_M - radial)
-        lift_xy = _outward_xy(g_close[:2], cfg, extra) if extra > 0.001 else np.asarray(g_close[:2], dtype=float)
-        if sc.get("_from_nest"):
-            nest_xy = np.asarray(nest_xyz(cfg)[:2], dtype=float)
-            away = np.asarray(g_close[:2], dtype=float) - nest_xy
-            n = float(np.linalg.norm(away))
-            if n > 1e-6:
-                lift_xy = np.asarray(g_close[:2], dtype=float) + away / n * 0.025
-        lift = [float(lift_xy[0]), float(lift_xy[1]), float(g_close[2] + lift_z)]
-        # Extract +Z with the close wrist so the pinch does not peel. Transit and
-        # lower then free wrist_flex to keep the piece world-upright.
-        extract = tuple(dict.fromkeys((*hold, "wrist_flex")))
-
-        def _lift(lock: tuple[str, ...], down: bool = False, x_axis=None) -> bool:
-            return move_lin(sim, lift, duration=1.2, physics=True, n_wp=8, lock_joints=lock, down=down, x_axis=x_axis)
-
-        # Vertical extract: the pinch is a hinge, so the piece hangs plumb; keeping
-        # gripper +X world-down while rising is what stops it peeling. A locked
-        # flex rotated the gripper up to 40 deg over a 30 mm lift near the base.
-        # If the grasp itself was not vertical (near-base squares, g/h files),
-        # freeze the *current* approach axis instead: re-verticalising while low
-        # swung the jaws 45 deg through the rank above (rook a1 knocked pawn a2).
-        _, R_g = sim.site_pose(EE_SITE)
-        grasp_axis = np.asarray(R_g, dtype=float).reshape(3, 3)[:, 0]
-        keep_axis = grasp_axis if gripper_tilt_deg(sim) > 6.0 else None
-        result["lift_axis_frozen"] = keep_axis is not None
-        lift_ok = _lift(tuple(hold), down=True, x_axis=keep_axis)
-        if not lift_ok:
-            result["lift_fallback"] = "locked_wrist"
-            lift_ok = _lift(extract)
-        if not lift_ok:
-            # With flex+roll locked only shoulder_lift/elbow remain, and near the
-            # folded (inner) edge of that 2R annulus a straight +Z is unreachable
-            # (rank-7 pawns: 6/32 board failures were exactly this). The pinch
-            # already holds the piece; a few degrees of flex beat abandoning it.
-            result["lift_fallback"] = "free_wrist"
-            lift_ok = _lift(tuple(hold))
-        if not lift_ok:
-            result["failure_reason"] = "IK_FAILURE"
-            log_state(sim, "fail_lift", extra={"target": lift})
-            return _done()
-        for _ in range(40):
-            sim.step()
-        log_state(sim, "006_lift")
-
-        qpos, qquat = sim.object_pose(tid)
-        object_xy = np.array(qpos[:2], dtype=np.float64)
-        result["T_gripper_queen_lift"] = gripper_object_transform(sim, tid)
-        result["place_diag"]["held_xy_after_lift_mm"] = [round(float(qpos[0]) * 1000, 1), round(float(qpos[1]) * 1000, 1)]
-        result["place_diag"]["T_ee_after_lift_mm"] = [round(v, 1) for v in result["T_gripper_queen_lift"]["p_ee_mm"]]
-        clearance = float(p.get("lift_clearance", 0.04))
-        held = grasp_acquired(sim, tid)
-        lifted = qpos[2] > surface + clearance
-        result["max_queen_height_mm"] = float(qpos[2] * 1000)
-        result["lift_success"] = bool(lifted and held and queen_upright(qquat, tilt_max=0.7))
-        if not result["lift_success"]:
-            result["failure_reason"] = "LIFT_DROP" if result["grasp_acquired"] else "GRASP_MISS"
-            again = _after_pick_fail(
-                sim, cfg, use_vision, sc, result, tid, surface, release_open
-            )
-            return again if again is not None else _done()
-        if sc.get("stop_after") == "lift":
-            result["success"] = True
-            result["failure_reason"] = None
-            return _done()
-
-        # A two-pad pinch is a hinge about the pinch axis. Once that axis has a
-        # vertical component (wrist at its flex limit on rank 7 + a roll chosen
-        # for clearance) the piece rolls on the pads and creeps out over the
-        # carry (e7e5 dropped after 60 mm). Roll the wrist so the axis is level;
-        # the piece only yaws.
-        # Leveling the pinch peels a short carry (g4→f3). Keep it for the
-        # long rank-7 transits it was added for.
-        carry_xy = float(np.linalg.norm(dest_xy[:2] - object_xy))
-        # Bowl dumps are a long carry, but orientation does not matter and
-        # leveling the pinch peels L-shaped men off the pads (Opera Bxf3).
-        if carry_xy > 0.08 and not off_board:
-            result["carry_level_roll_deg"] = round(_level_pinch_axis(sim), 2)
-        else:
-            result["carry_level_roll_deg"] = 0.0
-        if not grasp_acquired(sim, tid):
-            result["failure_reason"] = "LIFT_DROP"
-            result["lift_success"] = False
-            again = _after_pick_fail(
-                sim, cfg, use_vision, sc, result, tid, surface, release_open
-            )
-            return again if again is not None else _done()
-
-        gpos, _ = sim.site_pose(EE_SITE)
-        # Translate the believed object XY onto dest. Using the EE grasp point here
-        # would park the jaws on dest and leave the piece short by grasp_xy_offset.
-        delta = dest_xy[:2] - object_xy
-        dest_ee = np.array([float(gpos[0] + delta[0]), float(gpos[1] + delta[1])])
-        _, standoff = _xy_floor(dest_ee, cfg)
-        result["transport_standoff"] = bool(standoff)
-        z_ee, derived = safe_transit_ee_z(sim, float(gpos[2]), tid, obstacles)
-        if off_board:
-            # Extra hover so a long bowl carry does not kiss the file it just left.
-            z_ee = max(float(z_ee), float(gpos[2]) + 0.03)
-        result["transit_z"] = z_ee
-        result["transit_z_derived"] = derived
-        result["transport_path"] = "over_board"
-        if z_ee > float(gpos[2]) + 0.004:
-            high = [float(gpos[0]), float(gpos[1]), z_ee]
-            raised = _carry_lin(sim, high, 0.8, 4, hold, extract)
-            if not raised:
-                out = _outward_xy(gpos[:2], cfg, 0.05)
-                high = [float(out[0]), float(out[1]), z_ee]
-                raised = _carry_lin(sim, high, 0.8, 4, hold, extract)
-            if not raised:
-                result["failure_reason"] = "IK_FAILURE"
-                log_state(sim, "fail_transport_raise", extra={"target": _xyz(high)})
-                return _done()
-            gpos, _ = sim.site_pose(EE_SITE)
-            z_ee, derived = safe_transit_ee_z(sim, float(gpos[2]), tid, obstacles)
-            result["transit_z"] = float(gpos[2])
-            result["transit_z_derived"] = derived
-        carry = [float(gpos[0] + delta[0]), float(gpos[1] + delta[1]), float(gpos[2])]
-        xy_dist = float(np.linalg.norm(delta))
-        n_xy = max(10, int(np.ceil(xy_dist / 0.02)))
-        log_state(sim, "007_transport")
-        ok, how = _transport_to(sim, carry, hold, cfg, n_xy, max(1.5, 0.4 * n_xy), obstacles=clutter, skip={tid})
-        result["transport_detour"] = how
-        if not ok:
-            result["failure_reason"] = "IK_FAILURE"
-            log_state(sim, "fail_transport", extra={"target": _xyz(carry), "detour": how})
-            return _done()
-        for _ in range(30):
-            sim.step()
-        qpos, qquat = sim.object_pose(tid)
-        over_dest = float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) < 0.04
-        # Near-base dests carry low (the 10 cm hover is dead). 40 mm clearance
-        # then called a held piece on dest a drop and scooped it into the cup.
-        held_over = bool(
-            grasp_acquired(sim, tid)
-            and (float(qpos[2]) > surface + 0.012 or over_dest)
-        )
-        result["transport_success"] = bool(held_over and over_dest and not result["transport_contact_transit"])
-        result["min_queen_piece_clearance_mm"] = None if mins["queen_mm"] >= 1e8 else float(mins["queen_mm"])
-        result["min_gripper_piece_clearance_mm"] = None if mins["gripper_mm"] >= 1e8 else float(mins["gripper_mm"])
-        result["min_camera_piece_clearance_mm"] = None if mins["camera_mm"] >= 1e8 else float(mins["camera_mm"])
-        log_state(
-            sim,
-            "007_transport",
-            extra={
-                "target": _xyz(carry),
-                "dest": dest,
-                "path": result["transport_path"],
-                "detour": result.get("transport_detour"),
-                "transit_z": result.get("transit_z"),
-            },
-        )
-        if not result["transport_success"]:
-            result["failure_reason"] = "TRANSPORT_COLLISION" if result["transport_contact_transit"] else "TRANSPORT_DROP"
-            again = _after_pick_fail(
-                sim, cfg, use_vision, sc, result, tid, surface, release_open
-            )
-            return again if again is not None else _done()
-
-        gpos, _ = sim.site_pose(EE_SITE)
-        q_hold, _ = sim.object_pose(tid)
-        shift = dest_xy[:2] - q_hold[:2]
-        result["place_diag"]["piece_xy_before_lower_mm"] = [
-            round(float(q_hold[0]) * 1000, 1),
-            round(float(q_hold[1]) * 1000, 1),
-        ]
-        result["place_diag"]["piece_err_before_lower_mm"] = round(
-            float(np.hypot(q_hold[0] - dest_xy[0], q_hold[1] - dest_xy[1])) * 1000, 1
-        )
-        result["place_diag"]["ee_xy_before_lower_mm"] = [
-            round(float(gpos[0]) * 1000, 1),
-            round(float(gpos[1]) * 1000, 1),
-        ]
-        result["place_diag"]["T_ee_before_lower_mm"] = [
-            round(v, 1) for v in gripper_object_transform(sim, tid)["p_ee_mm"]
-        ]
-        # Aim held piece XY at dest, then lower vertically. Combined diagonal
-        # lower would drag the piece by the leftover grasp/carry offset.
-        place_z = float(g_close[2]) + place_hover
-        standoff = bool(result.get("transport_standoff"))
-        # Least-tilted reachable pinch at this hover, then lock and translate.
-        # Re-solving vertical *during* the lower swings the jaws (f1c4). Far
-        # squares cannot be truly vertical; this is the same compromise the
-        # real wrist will have to make.
-        gpos, _ = sim.site_pose(EE_SITE)
-        hover = [float(gpos[0]), float(gpos[1]), float(gpos[2])]
-        vert_place = _vertical_wrist(sim, hover)
-        if vert_place is not None:
-            _pitch_holding(sim, vert_place["wrist_flex"], closed_g, tid)
-            result["place_hover_tilt_deg"] = round(vert_place["tilt_deg"], 2)
-        _, R_place = sim.site_pose(EE_SITE)
-        place_axis = np.asarray(R_place, dtype=float).reshape(3, 3)[:, 0]
-        keep_place = place_axis if gripper_tilt_deg(sim) > 6.0 else None
-        # Destination clearance: which side the moving jaw faces (roll, level
-        # pinch either way) and how wide to open without slapping a neighbour.
-        place_plan = _plan_place(sim, tid, dest_xy, place_z, hold, release_open, x_axis=keep_place)
-        result["place_plan"] = place_plan
-        d_roll = abs(float(place_plan["roll"]) - float(sim.qpos()["wrist_roll"]))
-        if 0.05 < d_roll < 1.0:
-            _roll_holding(sim, float(place_plan["roll"]))
-        # If the grasp was not already world-down, freeze that axis so the jaws
-        # translate instead of swinging the piece onto its side (f1c4).
-        vertical_place = _lower_vertical(sim, tid, dest_xy, place_z, hold, result, x_axis=keep_place)
-        if vertical_place:
-            place = vertical_place
-        else:
-            align = [float(gpos[0] + shift[0]), float(gpos[1] + shift[1]), float(gpos[2])]
-            place = [align[0], align[1], place_z]
-            if float(np.hypot(shift[0], shift[1])) > 0.001:
-                if _carry_lin(sim, align, 0.5, 6, hold, extract):
-                    gpos, _ = sim.site_pose(EE_SITE)
-                    q_hold, _ = sim.object_pose(tid)
-                    shift = dest_xy[:2] - q_hold[:2]
-                    place = [
-                        float(gpos[0] + shift[0]),
-                        float(gpos[1] + shift[1]),
-                        place_z,
-                    ]
-            result["place_diag"]["lower_target_xy_mm"] = [round(place[0] * 1000, 1), round(place[1] * 1000, 1)]
-            lower_ok = _carry_lin(sim, place, 1.2, 12, hold, extract)
-            if not lower_ok:
-                result["failure_reason"] = "IK_FAILURE"
-                result["ik_fail_phase"] = "008_lower"
-                log_state(sim, "fail_lower", extra={"target": _xyz(place)})
-                return _done()
-        q_lo, _ = sim.object_pose(tid)
-        off = float(np.hypot(q_lo[0] - dest_xy[0], q_lo[1] - dest_xy[1]))
-        if standoff and 0.012 < off < 0.022:
-            gpos, _ = sim.site_pose(EE_SITE)
-            shift = dest_xy[:2] - q_lo[:2]
-            inch = [float(gpos[0] + shift[0]), float(gpos[1] + shift[1]), float(gpos[2])]
-            if _carry_lin(sim, inch, 0.8, 8, hold, extract):
-                place = inch
-                result["place_diag"]["standoff_inch"] = True
-    log_state(sim, "008_lower", extra={"target": _xyz(place)})
-    q_lo, _ = sim.object_pose(tid)
-    g_lo, r_lo = sim.site_pose(EE_SITE)
-    result["place_diag"]["piece_xy_after_lower_mm"] = [
-        round(float(q_lo[0]) * 1000, 1),
-        round(float(q_lo[1]) * 1000, 1),
-    ]
-    result["place_diag"]["piece_err_after_lower_mm"] = round(
-        float(np.hypot(q_lo[0] - dest_xy[0], q_lo[1] - dest_xy[1])) * 1000, 1
-    )
-    result["place_diag"]["ee_xy_after_lower_mm"] = [
-        round(float(g_lo[0]) * 1000, 1),
-        round(float(g_lo[1]) * 1000, 1),
-    ]
-    result["place_diag"]["ee_x_z_after_lower"] = round(float(r_lo[2, 0]), 3)
-    result["place_diag"]["T_ee_after_lower_mm"] = [
-        round(v, 1) for v in gripper_object_transform(sim, tid)["p_ee_mm"]
-    ]
-
-    _, g_hi = sim.joint_limits()["gripper"]
-    # Narrower than approach open: a full 0.60 swing slaps neighbors
-    # once the piece is already on the square.
-    release_g = min(float(g_hi), float(release_open))
-    open_gripper(sim, release_g, steps=100)
-    settle_queen(sim, steps=16)
-    _belief_set_down(sim, tid, surface)
-    result["release_after_open"] = release_snapshot(sim, tid)
-    q_open, _ = sim.object_pose(tid)
-    result["place_diag"]["piece_xy_after_open_mm"] = [
-        round(float(q_open[0]) * 1000, 1),
-        round(float(q_open[1]) * 1000, 1),
-    ]
-    result["place_diag"]["piece_err_after_open_mm"] = round(
-        float(np.hypot(q_open[0] - dest_xy[0], q_open[1] - dest_xy[1])) * 1000, 1
-    )
-    result["place_diag"]["still_held_after_open"] = bool(grasp_acquired(sim, tid))
-    result["place_diag"]["piece_z_after_open_mm"] = round(float(q_open[2]) * 1000, 1)
-    result["place_diag"]["release_gripper"] = round(release_g, 3)
-
-    wrist = ("wrist_flex", "wrist_roll")
-    release_lift = float(p.get("release_lift_z", 0.08))
-    result["place_diag"]["airborne_after_open"] = float(q_open[2]) > surface + 0.012
-    result["release_after_lift"] = release_snapshot(sim, tid)
-
-    q_rel, qquat_rel = sim.object_pose(tid)
-    result["release_position_error_mm"] = float(np.hypot(q_rel[0] - dest_xy[0], q_rel[1] - dest_xy[1])) * 1000
-    result["place_diag"]["release_xy_mm"] = [
-        round(float(q_rel[0]) * 1000, 1),
-        round(float(q_rel[1]) * 1000, 1),
-    ]
-    result["place_diag"]["release_err_mm"] = round(result["release_position_error_mm"], 1)
-    still_held = bool(grasp_acquired(sim, tid) and float(q_rel[2]) > surface + 0.012)
-    if off_board:
-        seated = bowl_contains(q_rel, dest_xy)
-        upright = True
-    else:
-        seated = object_on_board(sim, surface, object_id=tid)
-        result["place_diag"]["tilt_deg"] = round(float(queen_tilt_deg(qquat_rel)), 1)
-        upright = queen_upright(qquat_rel, tilt_max=0.5)
-    result["place_diag"]["still_held"] = still_held
-    result["place_diag"]["jaw_contact"] = bool(grasp_acquired(sim, tid))
-    result["place_diag"]["seated"] = bool(seated)
-    result["place_diag"]["upright"] = bool(upright)
-    result["place_diag"]["piece_z_mm"] = round(float(q_rel[2]) * 1000, 1)
-    result["place_diag"]["off_board"] = bool(off_board)
-    log_state(sim, "009_release", extra={"release_err_mm": round(result["release_position_error_mm"], 2)})
-
-    gpos, _ = sim.site_pose(EE_SITE)
-    touching = bool(grasp_acquired(sim, tid))
-    result["place_diag"]["jaw_contact_before_retreat"] = touching
-    z_up = max(
-        float(gpos[2]) + release_lift,
-        float(result.get("transit_z") or 0.0),
-        _transit_z(sim, cfg, skip={tid}),
-    )
-    high = [float(gpos[0]), float(gpos[1]), z_up]
-    retreated = True
-    near_dest = float(np.hypot(q_rel[0] - dest_xy[0], q_rel[1] - dest_xy[1])) < 0.028
-    straight_up = None
-    if not off_board:
-        spec = PIECES.get(body_kind(tid) or tid) or {}
-        jaw_clear = float(spec.get("height", 0.055)) - float(spec.get("preferred_grasp_height", 0.01)) + 0.01
-        avoid = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
-        bearing = _hand_bears_on(sim, tid)
-        result["place_diag"]["hand_bears_on_piece"] = bearing
-        centred = {"ok": False, "why": "bearing"} if bearing else _centred_retreat(sim, tid, avoid, z_up, jaw_clear)
-        result["place_diag"]["retreat_centred"] = centred
-        if centred["ok"]:
-            straight_up = []
-            if not centred["high"]:
-                g_top, _ = sim.site_pose(EE_SITE)
-                _safe_lin(sim, [float(g_top[0]), float(g_top[1]), z_up], cfg, wrist,
-                          obstacles=obstacle_bodies(sim, skip={tid}), skip={tid})
-        else:
-            straight_up = plumb.retreat(sim, avoid, z_up, jaw_clear, touching=lambda: bystander_contact(sim, [tid]))
-        result["place_diag"]["retreat_straight"] = straight_up is not None or getattr(sim, "plumb_fail", None)
-    if straight_up is not None:
-        retreated = True
-    elif (seated or (upright and near_dest)) and not off_board:
-        # Get the pads off the lip, then rise. Skipping that check (or
-        # `_safe_lin(skip=tid)`) combs the crown and knocks the piece.
-        # "Seated" needs board contact; a man still on the pads is upright
-        # on dest and must take this path, not a floored +Z.
-        leave = _clear_then_rise(sim, cfg, tid, z_min=z_up)
-        result["place_diag"]["pad_clear_mm"] = leave.get("pad_clear_mm", 0.0)
-        result["place_diag"]["retreat_cleared"] = bool(leave.get("cleared"))
-        result["place_diag"]["short_retreat"] = not bool(leave.get("rose"))
-        retreated = True
-    elif float(gpos[2]) < z_up - 0.01:
-        retreated = _safe_lin(
-            sim, high, cfg, wrist, obstacles=obstacle_bodies(sim, skip={tid}), skip={tid}
-        )
-    settle_queen(sim, steps=48)
-    still_held = bool(grasp_acquired(sim, tid) and float(sim.object_pose(tid)[0][2]) > surface + 0.012)
-    result["placement_success"] = _placed(sim, cfg, tid, dest, dest_xy, surface, off_board) and not still_held
-    result["retreat_success"] = bool(retreated)
-    if not retreated:
-        result["ik_fail_phase"] = "010_final"
-        log_state(sim, "fail_retreat", extra={"target": _xyz(high)})
-    log_state(sim, "010_final")
+    steps = (P["observe"].locate, P["grasp_plan"].plan, P["approach"].run, P["close"].close,
+             P["carry"].carry, P["release"].release, P["retreat"].back_off)
+    for step in steps:
+        out = step(m)
+        if out is not None:
+            return _end(out)
+    out = P["observe"].confirm(m)
 
     qpos, qquat = W.object_pose(tid)
     result["final_position_error_mm"] = float(np.hypot(qpos[0] - dest_xy[0], qpos[1] - dest_xy[1])) * 1000
     result["final_queen_xyz"] = qpos.tolist()
     result["place_diag"]["final_err_mm"] = round(result["final_position_error_mm"], 1)
     result["place_diag"]["final_upright"] = bool(queen_upright(qquat, tilt_max=0.5))
-    if not result["placement_success"]:
-        result["failure_reason"] = "RELEASE_FAILURE" if still_held else "PLACEMENT_POSITION_ERROR"
-        again = _after_place_fail(
-            sim, cfg, use_vision, sc, result, tid, surface, release_open
-        )
-        return again if again is not None else _done()
+    if out is not None:
+        return _end(out)
     result["success"] = True
     result["failure_reason"] = None
     return _done()
