@@ -61,7 +61,7 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
         from mj import Sim, load_config
         from robot import jaw_squeezing, open_robot, wall_perception, world_of
         from scenario import PIECES
-        from sequence import occupied_squares
+        from occupancy import occupied_squares
         from squares import square_to_world
         from suites.chess_moves import _pads_in_piece
 

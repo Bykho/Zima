@@ -29,6 +29,7 @@ from ik import (
     EE_SITE,
     cart_duration,
     gripper_tilt_deg,
+    joint_limit_margin,
     move_ik,
     move_lin,
     move_qpos,
@@ -39,6 +40,9 @@ from ik import (
 from mj import ARM_JOINTS, DEBUG_DIR, Sim, load_config, probing
 from clearance import (
     APPROACH_BODIES,
+    CAMERA_BODIES,
+    _WORKSPACE_R_M,
+    _arm_base_xy,
     board_top_z,
     closest_pair,
     neighbor_approach_gap,
@@ -50,11 +54,9 @@ from stages.types import Move, Retry, Stop
 from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
-from sequence import square_of_body
+from occupancy import square_of_body
 from robot import GRIP_SETTLE_STEPS, GRIP_STILL_RADS, GRIP_STILL_READS, WALLS, jaw_squeezing, open_robot, world_of
 
-JAW_BODIES = ("gripper", "moving_jaw_so101_v1")
-CAMERA_BODIES = ("camera_mount",)
 ARM_BODIES = ("base", "shoulder", "upper_arm", "lower_arm")
 FULL_BOARD_XML = ROOT / "assets/so101/chess_scene_full.xml"
 PIECES_XML = ROOT / "assets/so101/chess_scene_pieces.xml"
@@ -487,15 +489,6 @@ def _grasp_xy_for_roll(sim: Sim, piece_xy, z: float, geom: dict | None, roll: fl
         sim.set_qpos(snap, hold=True)
 
 
-_WORKSPACE_R_M = 0.19
-
-
-def _arm_base_xy(cfg: dict) -> np.ndarray:
-    sim = cfg.get("sim", {})
-    raw = sim.get("arm_base_position") or sim.get("arm_base_position") or [0.08, 0.045, 0.0]
-    return np.asarray(raw[:2], dtype=float)
-
-
 def _outward_xy(xy, cfg: dict, extra_m: float) -> np.ndarray:
     """Shift XY further from the arm base along the base→target ray."""
     base = _arm_base_xy(cfg)
@@ -634,22 +627,6 @@ def min_body_gap(sim: Sim, body_a: str, body_b: str) -> float:
             if d < best:
                 best = d
     return float(best)
-
-
-def joint_limit_margin(sim: Sim) -> dict:
-    q = sim.qpos()
-    margins = {}
-    best = 1e9
-    tightest = None
-    for n in ARM_JOINTS:
-        lo, hi = sim.model.jnt_range[sim._joint[n]]
-        v = q[n]
-        m = float(min(v - lo, hi - v))
-        margins[n] = round(m, 4)
-        if m < best:
-            best = m
-            tightest = n
-    return {"min_rad": float(best), "tightest": tightest, "per_joint": margins}
 
 
 def close_gripper(sim: Sim, closed: float, steps: int = 200):

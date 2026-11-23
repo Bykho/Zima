@@ -5,10 +5,10 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 
+from clearance import JAW_BODIES
 from ik import EE_SITE
 from mj import Sim
 from pickup import (
-    JAW_BODIES,
     _perceiving,
     _tid,
     bowl_contains,

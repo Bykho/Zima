@@ -83,7 +83,7 @@ def placement(world, cfg: dict, body: str, dst: str) -> dict:
     `ok_loose` is the earlier rule: the nearest square is `dst` and the body is upright,
     which also passed a piece still airborne in the jaws over the square.
     """
-    from sequence import occupied_squares
+    from occupancy import occupied_squares
     from squares import square_to_world
 
     surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
@@ -108,7 +108,7 @@ def placement(world, cfg: dict, body: str, dst: str) -> dict:
 
 def score_board_move(world, cfg: dict, before: dict, mover: str | None, victim: str | None, dst: str) -> dict:
     """Verdict for one chess move. `before` snapshots every piece on the board before the move."""
-    from sequence import occupied_squares
+    from occupancy import occupied_squares
 
     occ_after = occupied_squares(world, cfg)
     place = placement(world, cfg, mover, dst) if mover is not None else None
@@ -187,7 +187,7 @@ def score_lift(world, cfg: dict, before: dict, mover: str, dst: str | None = Non
 
 def board_snapshot(world, cfg: dict) -> tuple[dict, dict]:
     """(square -> body, snapshot of those bodies) for the pieces now on the board."""
-    from sequence import occupied_squares
+    from occupancy import occupied_squares
 
     occ = occupied_squares(world, cfg)
     return occ, snapshot(world, list(occ.values()))

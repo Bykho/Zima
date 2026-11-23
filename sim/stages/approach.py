@@ -5,12 +5,11 @@ from __future__ import annotations
 import numpy as np
 
 import carry as plumb
-from clearance import HARD_MARGIN, obstacle_bodies, plan_approach, verify_approach
-from ik import EE_SITE, gripper_tilt_deg, move_ik, move_lin, solve_ik_down
+from clearance import HARD_MARGIN, JAW_BODIES, obstacle_bodies, plan_approach, verify_approach
+from ik import EE_SITE, gripper_tilt_deg, joint_limit_margin, move_ik, move_lin, solve_ik_down
 from mj import ARM_JOINTS, JOINT_NAMES, Sim
 import pickup
 from pickup import (
-    JAW_BODIES,
     _drive_arm,
     _grasp_xy_for_roll,
     _safe_lin,
@@ -18,7 +17,6 @@ from pickup import (
     _transit_z,
     _xyz,
     bystander_contact,
-    joint_limit_margin,
     locate_queen,
     log_state,
     min_jaw_gap,

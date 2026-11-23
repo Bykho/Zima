@@ -14,7 +14,7 @@ from pickup import (
     queen_upright,
     verify_piece,
 )
-from sequence import square_of_body
+from occupancy import square_of_body
 from squares import nest_xyz, square_to_world
 from stages import register
 from stages.types import Fail, Move

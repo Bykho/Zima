@@ -12,49 +12,11 @@ import numpy as np
 
 from ik import solve_ik, solve_ik_down, solve_ik_upright
 from mj import probing
-from scenario import body_kind
-from squares import parse_square, shift_square, square_to_world
+from occupancy import neighbor_occupancy
+from squares import parse_square
 
 JAW_BODIES = ("gripper", "moving_jaw_so101_v1")
 CAMERA_BODIES = ("camera_mount",)
-
-
-def neighbor_squares(source: str) -> list[str]:
-    out = []
-    for df in (-1, 0, 1):
-        for dr in (-1, 0, 1):
-            if df == 0 and dr == 0:
-                continue
-            sq = shift_square(source, df, dr)
-            if sq:
-                out.append(sq)
-    return out
-
-
-def occupied_neighbor_bodies(sim, cfg: dict, source: str) -> dict[str, str]:
-    """Map occupied neighbor squares of `source` to a collision body name."""
-    import mujoco
-
-    want = set(neighbor_squares(source))
-    found: dict[str, str] = {}
-    size = float(cfg.get("sim", {}).get("board", {}).get("square_size", 0.0375))
-    for i in range(sim.model.nbody):
-        name = mujoco.mj_id2name(sim.model, mujoco.mjtObj.mjOBJ_BODY, i)
-        if not name or float(sim.data.xpos[i][2]) <= 0.0:
-            continue
-        if not body_kind(name):
-            continue
-        sq = None
-        best = 0.55 * size
-        for nsq in want:
-            p = square_to_world(nsq, cfg)
-            d = float(np.hypot(float(sim.data.xpos[i][0]) - p[0], float(sim.data.xpos[i][1]) - p[1]))
-            if d < best:
-                best = d
-                sq = nsq
-        if sq in want:
-            found[sq] = name
-    return found
 
 
 # Clutter-aware approach: small candidate set around the existing grasp.
@@ -935,7 +897,7 @@ def plan_approach(
 
     occ: dict[str, str] = {}
     if neighbors and source and cfg is not None:
-        occ = occupied_neighbor_bodies(sim, cfg, source)
+        occ = neighbor_occupancy(sim, cfg, source)
     # Aperture is a search dimension, widest first: the wide jaw is the most
     # forgiving grasp, but on a crowded board it reaches into the next square
     # along the pinch axis, so each roll is retried narrower before moving on.

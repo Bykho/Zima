@@ -388,10 +388,8 @@ def _reachable_approaches(sim, candidates, goal, lock_joints, max_err, reset, ac
         sim.set_qpos(snap, hold=True)
 
 
-def ik_fail_snapshot(sim: Sim, requested) -> dict:
-    """EE requested vs actual plus residual and joint-limit margin. No motion."""
-    pos, _ = sim.site_pose(EE_SITE)
-    req = np.asarray(requested, dtype=np.float64)
+def joint_limit_margin(sim: Sim) -> dict:
+    """Distance (rad) of each arm joint to its nearer limit, and the tightest joint."""
     q = sim.qpos()
     per: dict[str, float] = {}
     best = 1e9
@@ -403,15 +401,19 @@ def ik_fail_snapshot(sim: Sim, requested) -> dict:
         if m < best:
             best = m
             tightest = n
+    return {"min_rad": float(best), "tightest": tightest, "per_joint": per}
+
+
+def ik_fail_snapshot(sim: Sim, requested) -> dict:
+    """EE requested vs actual plus residual and joint-limit margin. No motion."""
+    pos, _ = sim.site_pose(EE_SITE)
+    req = np.asarray(requested, dtype=np.float64)
+    margin = joint_limit_margin(sim)
     return {
         "ee_requested": [round(float(req[0]), 4), round(float(req[1]), 4), round(float(req[2]), 4)],
         "ee_actual": [round(float(pos[0]), 4), round(float(pos[1]), 4), round(float(pos[2]), 4)],
         "ik_residual_mm": round(float(np.linalg.norm(pos - req)) * 1000.0, 2),
-        "joint_limit_margin_rad": {
-            "min_rad": round(float(best), 4),
-            "tightest": tightest,
-            "per_joint": per,
-        },
+        "joint_limit_margin_rad": {**margin, "min_rad": round(margin["min_rad"], 4)},
     }
 
 

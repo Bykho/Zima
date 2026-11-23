@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from clearance import neighbor_squares
-from sequence import Move, occupied_squares, piece_kind
+from occupancy import neighbor_squares, occupied_squares
+from sequence import Move, piece_kind
 from squares import parse_square
 from stages import register
 

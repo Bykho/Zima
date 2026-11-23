@@ -62,7 +62,8 @@ def _ik_at(sim, cfg: dict, xyz, gripper: float | None = None) -> bool:
 def _measure_layout(sim, cfg: dict) -> dict:
     import numpy as np
 
-    from clearance import neighbor_approach_gap, occupied_neighbor_bodies
+    from clearance import neighbor_approach_gap
+    from occupancy import neighbor_occupancy
     from pickup import pickup_cfg
     from scenario import PIECES, STARTING_POSITION
     from squares import FILES, square_to_world
@@ -82,7 +83,7 @@ def _measure_layout(sim, cfg: dict) -> dict:
     for kind, sq in STARTING_POSITION:
         x, y, _ = square_to_world(sq, cfg, z=surface)
         ok = _ik_at(sim, cfg, [x, y, surface + float(PIECES[kind]["preferred_grasp_height"])], gripper=open_g)
-        near = list(occupied_neighbor_bodies(sim, cfg, sq).values())
+        near = list(neighbor_occupancy(sim, cfg, sq).values())
         gap = float(neighbor_approach_gap(sim, near)) if ok and near else (1.0 if ok else None)
         if gap is not None and near:
             gaps.append(gap * 1000.0)

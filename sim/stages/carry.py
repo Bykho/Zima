@@ -9,12 +9,19 @@ from __future__ import annotations
 import numpy as np
 
 import carry as plumb
-from clearance import APPROACH_BODIES, near_bodies, obstacle_bodies, safe_transit_ee_z, transit_clearances, transit_nontarget_hit
+from clearance import (
+    APPROACH_BODIES,
+    _WORKSPACE_R_M,
+    _arm_base_xy,
+    near_bodies,
+    obstacle_bodies,
+    safe_transit_ee_z,
+    transit_clearances,
+    transit_nontarget_hit,
+)
 from ik import CARRY_ORI_WEIGHT, EE_SITE, gripper_tilt_deg, move_lin, solve_ik_down
 from mj import ARM_JOINTS, Sim, probing
 from pickup import (
-    _WORKSPACE_R_M,
-    _arm_base_xy,
     _chain_ik_ok,
     _drive_arm,
     _floor_wp,
@@ -33,7 +40,7 @@ from pickup import (
     robot_part,
 )
 from scenario import STARTING_AT
-from sequence import square_of_body
+from occupancy import square_of_body
 from squares import nest_xyz
 from stages import register
 from stages.types import Fail, Move, Stop

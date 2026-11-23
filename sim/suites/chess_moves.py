@@ -60,7 +60,7 @@ def suite_cases(suite: str) -> list[dict]:
 
 def _setup_world(world, cfg: dict, setup: list[str]) -> set[str]:
     """Apply prior moves by placing bodies. Returns captured bodies (parked off the table)."""
-    from sequence import occupied_squares
+    from occupancy import occupied_squares
     from squares import square_to_world
 
     surface = float(cfg["sim"]["board"]["surface_z"])

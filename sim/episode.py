@@ -16,12 +16,8 @@ from pickup import (
 )
 from scenario import HIDE_XYZ, PIECE_BODIES, body_kind, piece_scenario
 import stages
-from sequence import (
-    UnstackFrame,
-    occupied_squares,
-    piece_kind,
-    probe_approach,
-)
+from occupancy import occupied_squares
+from sequence import UnstackFrame, piece_kind, probe_approach
 from squares import bowl_xyz, parse_move, square_to_world
 
 

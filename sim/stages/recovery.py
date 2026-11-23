@@ -5,11 +5,10 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 
+from clearance import _WORKSPACE_R_M, _arm_base_xy
 from ik import EE_SITE, move_lin, move_qpos, pose_reaches, reachable_approaches, solve_ik
 from mj import ARM_JOINTS, Sim, probing
 from pickup import (
-    _WORKSPACE_R_M,
-    _arm_base_xy,
     _backoff_grasp,
     _move_q_hold,
     _outward_xy,
@@ -28,7 +27,7 @@ from pickup import (
     settle_queen,
 )
 from scenario import PIECES, body_kind
-from sequence import square_of_body
+from occupancy import square_of_body
 from squares import nest_xyz
 from stages import register
 from stages.types import Retry
