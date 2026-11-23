@@ -6,16 +6,6 @@ from stages import register
 
 
 
-@register("approach", "vertical_column")
-class VerticalColumn:
-    """Collision-free vertical approach, pregrasp, re-look and re-verify, descend to the grasp."""
-
-    def run(self, m):
-        import pickup
-
-        return pickup._stage_approach(m)
-
-
 @register("close", "load_check")
 class LoadCheck:
     """Close the jaws; the grasp counts from gripper load."""
