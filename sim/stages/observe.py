@@ -57,6 +57,11 @@ def locate(m: Move):
             return Fail("observe", result["failure_reason"], "pick")
         log_state(sim, "002_observe", extra={"target": _xyz(look)})
         queen_xyz = locate_queen(sim, cfg, result, source)
+        if queen_xyz is None and tid not in sim.known:
+            result["failure_reason"] = "PERCEPTION_FAIL"
+            result["queen_detected"] = False
+            log_state(sim, "fail_observe", extra={"target": _xyz(prior), "seen": False})
+            return Fail("observe", result["failure_reason"])
         if queen_xyz is None:
             # Commanded square is already the prior. Empty cloud on rank 8
             # (b8c6 after g1f3) should not abort the move.
