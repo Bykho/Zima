@@ -24,6 +24,14 @@ from statistics import median
 ROOT = Path(__file__).resolve().parents[1]
 BASELINES = ROOT / "baselines"
 FIELDS = ("ok", "reason", "stage")
+# Kinematic suite metrics: counts must match; *_mm within MM_TOL. Higher is better unless listed.
+MM_TOL = 0.5
+LOWER_IS_BETTER = {"n_collide"}
+
+
+def baseline_name(suite: str, wall: str) -> str:
+    """`<suite>_<wall>`, or `<suite>` for a kinematic suite (wall `none`)."""
+    return suite if wall == "none" else f"{suite}_{wall}"
 
 
 def _read_rows(path: Path) -> list[dict]:
@@ -53,7 +61,7 @@ def load_baselines(rows: list[dict]) -> tuple[list[dict], dict, str]:
     metas: dict = {}
     names = []
     for suite, wall in sorted({(r.get("suite", ""), r["wall"]) for r in rows}):
-        name = f"{suite}_{wall}"
+        name = baseline_name(suite, wall)
         if not (BASELINES / name).is_dir():
             print(f"note: no baseline {name}", file=sys.stderr)
             continue
@@ -92,12 +100,29 @@ def _fmt(r: dict | None) -> str:
     return ("ok" if r["ok"] else "FAIL") + (f" {r.get('stage') or '?'}/{r.get('reason')}" if not r["ok"] else "")
 
 
+def metric_changes(a: dict, b: dict) -> list[tuple[str, object, object, bool]]:
+    """(name, old, new, worse) for each kinematic metric outside tolerance."""
+    out = []
+    ma, mb = a.get("metrics") or {}, b.get("metrics") or {}
+    for name in sorted(set(ma) | set(mb)):
+        x, y = ma.get(name), mb.get(name)
+        if x is None or y is None:
+            if x != y:
+                out.append((name, x, y, y is None))
+            continue
+        tol = MM_TOL if name.endswith("_mm") else 0
+        if abs(y - x) <= tol:
+            continue
+        out.append((name, x, y, (y > x) if name in LOWER_IS_BETTER else (y < x)))
+    return out
+
+
 def compare(new: list[dict], old: list[dict]) -> dict:
     with_suite = all("suite" in r for r in new + old)
     A = {key(r, with_suite): r for r in old}
     B = {key(r, with_suite): r for r in new}
     groups = sorted({group(r) for r in new} | {group(r) for r in old if key(r, with_suite) in B})
-    out: dict = {"groups": [], "flips": [], "changed": [], "only_old": [], "only_new": [], "phases": []}
+    out: dict = {"groups": [], "flips": [], "changed": [], "only_old": [], "only_new": [], "phases": [], "metrics": []}
     for g in groups:
         rb = [r for r in new if group(r) == g]
         ra = [A[key(r, with_suite)] for r in rb if key(r, with_suite) in A]
@@ -118,6 +143,8 @@ def compare(new: list[dict], old: list[dict]) -> dict:
             out["flips"].append((k, a, b))
         elif any(a.get(f) != b.get(f) for f in FIELDS):
             out["changed"].append((k, a, b))
+        if a is not None:
+            out["metrics"] += [(k, *m) for m in metric_changes(a, b)]
     out["only_old"] = [k for k in A if k not in B and group(A[k]) in {group(r) for r in new}]
     return out
 
@@ -136,6 +163,11 @@ def report(res: dict, new_label: str, old_label: str) -> str:
         lines.append(f"\nsame verdict, different reason/stage: {len(res['changed'])}")
         for k, a, b in res["changed"]:
             lines.append(f"  {'/'.join(map(str, k)):44s} {_fmt(a):40s} -> {_fmt(b)}")
+    if res["metrics"]:
+        worse = sum(1 for m in res["metrics"] if m[-1])
+        lines.append(f"\nmetrics changed: {len(res['metrics'])}  ({worse} worse)")
+        for k, name, x, y, bad in res["metrics"]:
+            lines.append(f"  {'/'.join(map(str, k)):44s} {name:14s} {x} -> {y}{'  WORSE' if bad else ''}")
     if res["only_old"] or res["only_new"]:
         lines.append(f"\nonly in old: {len(res['only_old'])}   only in new: {len(res['only_new'])}")
         for k in res["only_old"][:20]:
@@ -159,7 +191,7 @@ def save_baselines(run_dir: Path) -> list[str]:
     meta = json.loads((run_dir / "meta.json").read_text())
     saved = []
     for suite, wall in sorted({(r.get("suite", ""), r["wall"]) for r in rows}):
-        name = f"{suite}_{wall}"
+        name = baseline_name(suite, wall)
         d = BASELINES / name
         if d.exists():
             shutil.rmtree(d)
@@ -187,14 +219,14 @@ def main(argv: list[str] | None = None) -> int:
     old, old_meta, old_label = load(args.old) if args.old else load_baselines(new)
     res = compare(new, old)
     print(report(res, new_label, old_label))
-    regress = any(a["ok"] for _, a, _ in res["flips"])
+    regress = any(a["ok"] for _, a, _ in res["flips"]) or any(m[-1] for m in res["metrics"])
     if args.exact:
-        regress = regress or bool(res["flips"] or res["changed"] or res["only_old"] or res["only_new"])
+        regress = regress or bool(res["flips"] or res["changed"] or res["metrics"] or res["only_old"] or res["only_new"])
     cfg_old, cfg_new = old_meta.get("config_sha"), new_meta.get("config_sha")
     if cfg_old and cfg_new and cfg_old != cfg_new and not isinstance(cfg_old, set) and not args.allow_config:
         print(f"\nconfig.yaml differs ({cfg_old} vs {cfg_new}); pass --allow-config if intended")
         return 2
-    verdict = "EXACT" if not (res["flips"] or res["changed"] or res["only_old"] or res["only_new"]) else ("REGRESSION" if regress else "OK")
+    verdict = "EXACT" if not (res["flips"] or res["changed"] or res["metrics"] or res["only_old"] or res["only_new"]) else ("REGRESSION" if regress else "OK")
     print(f"\n{verdict}")
     return 1 if regress else 0
 

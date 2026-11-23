@@ -605,8 +605,7 @@ def test_world_is_physics_only():
     world.step(10)
     sim = open_robot(world, "real")
     refused = []
-    for call in (lambda: sim.place_object("pawn_e3", [0.3, 0.0, 0.02]), lambda: sim.hide_body("board"),
-                 lambda: sim.set_body_pos("board", [0, 0, 0]), lambda: sim.apply_arm_base([0, 0, 0]), sim.reset):
+    for call in (lambda: sim.place_object("pawn_e3", [0.3, 0.0, 0.02]), lambda: sim.apply_arm_base([0, 0, 0]), sim.reset):
         try:
             call()
         except WorldWrite:
@@ -630,8 +629,8 @@ def test_world_is_physics_only():
     sim.step()
     moved = float(np.hypot(*(world.body_pose("pawn_d2")[0][:2] - np.asarray(square_to_world("d4", cfg)[:2]))))
     sim.close()
-    ok = len(refused) == 5 and locked and caught and moved < 0.002
-    return check("world is physics-only after open_robot", ok, f"refused={len(refused)}/5 locked={locked} teleport_caught={caught}")
+    ok = len(refused) == 3 and locked and caught and moved < 0.002
+    return check("world is physics-only after open_robot", ok, f"refused={len(refused)}/3 locked={locked} teleport_caught={caught}")
 
 
 def main():

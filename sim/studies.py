@@ -26,9 +26,9 @@ from suites import SUITES  # noqa: E402
 def check_suite(name: str, exact: bool = False, jobs: int = runner.DEFAULT_JOBS) -> bool:
     s = SUITES[name]
     walls = [s.gate_wall, *[w for w in s.record_walls if w != s.gate_wall]]
-    missing = [w for w in walls if not (compare.BASELINES / f"{name}_{w}").is_dir()]
+    missing = [w for w in walls if not (compare.BASELINES / compare.baseline_name(name, w)).is_dir()]
     if s.gate_wall in missing:
-        print(f"[{name}] no baseline {name}_{s.gate_wall}: save one with `compare.py runs/<tag> --save-baseline`")
+        print(f"[{name}] no baseline {compare.baseline_name(name, s.gate_wall)}: save one with `compare.py runs/<tag> --save-baseline`")
         return False
     rows, run_dir = runner.run([name], walls, jobs=jobs, ids=list(s.quick), tag=f"studies_{name}")
     ok = True
@@ -37,11 +37,11 @@ def check_suite(name: str, exact: bool = False, jobs: int = runner.DEFAULT_JOBS)
             print(f"[{name} {w}] no baseline, not compared")
             continue
         new = [r for r in rows if r["wall"] == w]
-        old, _, label = compare.load(f"{name}_{w}")
+        old, _, label = compare.load(compare.baseline_name(name, w))
         old = [r for r in old if r["id"] in s.quick]
         res = compare.compare(new, old)
-        diff = bool(res["flips"] or res["changed"] or res["only_old"] or res["only_new"])
-        regress = any(a["ok"] for _, a, _ in res["flips"]) or bool(res["only_new"])
+        diff = bool(res["flips"] or res["changed"] or res["metrics"] or res["only_old"] or res["only_new"])
+        regress = any(a["ok"] for _, a, _ in res["flips"]) or any(m[-1] for m in res["metrics"]) or bool(res["only_new"])
         if exact:
             regress = regress or diff
         gate = w == s.gate_wall

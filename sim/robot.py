@@ -290,11 +290,7 @@ class Robot(Sim):
             return super().place_object(body, xyz, quat)
         self._refuse("place_object")
 
-    def hide_body(self, name: str, z: float = -1.0) -> bool:
-        self._refuse("hide_body")
 
-    def set_body_pos(self, name: str, xyz) -> bool:
-        self._refuse("set_body_pos")
 
     def apply_arm_base(self, pos=None) -> None:
         if getattr(self, "_world", None) is None:

@@ -320,32 +320,6 @@ class Sim:
     def place_queen(self, xyz, quat=(1.0, 0.0, 0.0, 0.0)):
         self.place_object("queen", xyz, quat)
 
-    def hide_body(self, name: str, z: float = -1.0) -> bool:
-        """Drop a static body below the board (proxies). Model-level; new Sim to undo."""
-        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
-        if bid < 0:
-            return False
-        self._scene_edit("hide_body")
-        self.model.body_pos[bid, 2] = float(z)
-        mujoco.mj_forward(self.model, self.data)
-        return True
-
-    def set_body_pos(self, name: str, xyz) -> bool:
-        """Move a static body (proxies) in the model."""
-        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
-        if bid < 0:
-            return False
-        self._scene_edit("set_body_pos")
-        self.model.body_pos[bid] = np.asarray(xyz, dtype=np.float64)
-        mujoco.mj_forward(self.model, self.data)
-        return True
-
-    def body_model_pos(self, name: str) -> np.ndarray | None:
-        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
-        if bid < 0:
-            return None
-        return np.asarray(self.model.body_pos[bid], dtype=np.float64).copy()
-
     def body_id(self, name: str) -> int:
         cache = self.__dict__.setdefault("_body_id_cache", {})
         bid = cache.get(name)

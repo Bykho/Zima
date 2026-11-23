@@ -7,7 +7,9 @@ stage and t. Register a new one by adding a `Suite` to SUITES.
 `quick` names the case ids `verify --studies` runs: on `gate_wall` they must not
 regress against `baselines/<suite>_<gate_wall>`; on `record_walls` they are
 compared and printed but do not fail verify. `report` adds a suite-specific
-view (grids, board maps) to the run summary.
+view (grids, board maps) to the run summary. A `kinematic` suite has no
+controller: it runs once on the pseudo-wall `none`, its rows carry `metrics`,
+and its baseline is `baselines/<suite>`.
 """
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ class Suite:
     gate_wall: str = "cheat"
     record_walls: tuple[str, ...] = ("real",)
     report: Callable[[list[dict]], str] | None = None
+    kinematic: bool = False
+
+    def walls(self, asked: list[str]) -> list[str]:
+        return ["none"] if self.kinematic else asked
 
 
 def _chess(name: str, about: str, quick: tuple[str, ...] = ()) -> Suite:
@@ -72,6 +78,20 @@ def _pickups(name: str) -> Suite:
     return Suite(cases=cases, run=pickups.run_queen, fail_row=pickups.fail_row, about=about, quick=quick, report=report)
 
 
+def _kinematic(name: str) -> Suite:
+    from suites import kinematic
+
+    if name == "layout":
+        return Suite(cases=kinematic.layout_cases, run=kinematic.run_layout, fail_row=kinematic.fail_row, timeout=300.0,
+                     about="board square size x a-file gap: 64-square IK reach, open-gripper neighbour gaps (no wall)",
+                     quick=("layout_config", "layout_40.0_100"), kinematic=True, gate_wall="none", record_walls=(),
+                     report=kinematic.report_layout)
+    return Suite(cases=kinematic.reach_cases, run=kinematic.run_reach, fail_row=kinematic.fail_row, timeout=120.0,
+                 about="arm base position grid: observe IK over the starting squares (no wall)",
+                 quick=("base_0.00_0.00", "base_0.08_0.03"), kinematic=True, gate_wall="none", record_walls=(),
+                 report=kinematic.report_reach)
+
+
 SUITES: dict[str, Suite] = {
     "opening": _chess("opening", "20 first moves from the start position"),
     "opera": _chess("opera", "every plain ply of the Opera game"),
@@ -84,4 +104,6 @@ SUITES: dict[str, Suite] = {
     "matrix": _pickups("matrix"),
     "starting": _pickups("starting"),
     **{n: _pickups(n) for n in ("offsets", "perception_error", "neighbors", "transport")},
+    "layout": _kinematic("layout"),
+    "reach": _kinematic("reach"),
 }

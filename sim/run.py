@@ -58,8 +58,8 @@ def main(argv: list[str] | None = None, default_walls: str = "cheat,real", mirro
     bad = [s for s in suites if s not in SUITES] + [w for w in walls if w not in WALLS]
     if bad:
         raise SystemExit(f"unknown suite/wall: {', '.join(bad)} (see --list)")
-    n = sum(len(runner.select_cases(s, _csv(args.only))) for s in suites)
-    print(f"{n} cases x {len(walls)} walls = {n * len(walls)} episodes on {args.jobs} workers")
+    n = sum(len(runner.select_cases(s, _csv(args.only))) * len(SUITES[s].walls(walls)) for s in suites)
+    print(f"{n} episodes on {args.jobs} workers")
     if args.realism:
         os.environ["ZIMA_REALISM"] = "1"
     rows, run_dir = runner.run(suites, walls, jobs=args.jobs, timeout=args.timeout, only=_csv(args.only),

@@ -255,7 +255,7 @@ def run(suites: list[str], walls: list[str], *, jobs: int = DEFAULT_JOBS, timeou
     for s in suites:
         t = timeout if timeout is not None else SUITES[s].timeout
         cases = select_cases(s, only or [], ids)
-        work += [(s, c, w, t) for w in walls for c in cases]
+        work += [(s, c, w, t) for w in SUITES[s].walls(walls) for c in cases]
     run_dir = (out or RUNS) / tag
     run_dir.mkdir(parents=True, exist_ok=True)
     meta = {"tag": tag, "suites": suites, "walls": walls, "jobs": jobs, "only": only or [], "ids": ids, "episodes": len(work),

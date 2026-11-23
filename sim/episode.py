@@ -32,7 +32,7 @@ def setup_board(world, cfg: dict, sc: dict, spawn_xy=None) -> None:
     A 32-piece board already has every man on its square — leave it alone.
     On a populated board, pieces sitting on other squares stay put.
     """
-    if world.body_model_pos("pawn_e2") is not None:
+    if world.body_id("pawn_e2") >= 0:
         return
     tid = sc.get("target_id", "queen")
     source = sc.get("source", pickup_cfg(cfg).get("source", "d1"))
