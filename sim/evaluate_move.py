@@ -177,9 +177,11 @@ def score_lift(world, cfg: dict, before: dict, mover: str, dst: str | None = Non
     surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
     p, q = world.body_pose(mover)
     lifted = (float(p[2]) - surface) * 1000 > LIFTED_MM
-    placed = dst is not None and placement(world, cfg, mover, dst)["ok"]
+    place = placement(world, cfg, mover, dst) if dst is not None else {"ok": False, "ok_loose": False}
+    placed = place["ok"]
     hits = disturbed(world, before, skip=(mover,))
-    return {"ok": bool((lifted or placed) and not hits), "lifted": bool(lifted), "placed": bool(placed), "disturbed": hits,
+    return {"ok": bool((lifted or placed) and not hits), "ok_loose": bool((lifted or place["ok_loose"]) and not hits),
+            "lifted": bool(lifted), "placed": bool(placed), "disturbed": hits,
             "mover_final": {"xyz_mm": [round(float(v) * 1000, 1) for v in p], "tilt": round(tilt_deg(q), 1)}}
 
 
