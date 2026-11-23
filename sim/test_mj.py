@@ -150,6 +150,36 @@ def test_wrist_localize():
     )
 
 
+def test_look_fits_piece_shape():
+    """Post-release look on the real wall: an off-centre knight is located at its base, not its centroid."""
+    import numpy as np
+    import pickup
+    from robot import open_robot
+    from scenario import HIDE_XYZ, PIECE_BODIES
+
+    cfg = load_config()
+    surface = float(cfg["sim"]["board"]["surface_z"])
+    world = Sim(xml_path=pickup.PIECES_XML, cfg=cfg)
+    for n in PIECE_BODIES:
+        if n != "knight":
+            world.place_object(n, HIDE_XYZ)
+    c = square_to_world("f3", cfg, z=surface)
+    world.place_object("knight", [c[0] - 0.008, c[1] + 0.006, c[2]])
+    world.step(60)
+    sim = open_robot(world, "real")
+    sim.quiet = True
+    sim.target_id = "knight"
+    pickup.seed_vertical(sim, cfg)
+    look = pickup.verify_piece(sim, cfg, "knight", "f3")
+    truth = world.object_pose("knight")[0]
+    sim.close()
+    world.close()
+    if not look.get("seen"):
+        return check("look fits piece shape", False, "not seen")
+    err = float(np.hypot(look["xy"][0] - truth[0], look["xy"][1] - truth[1]))
+    return check("look fits piece shape", bool(look.get("fitted")) and err < 0.0005, f"xy_err={err*1000:.2f}mm fitted={look.get('fitted')}")
+
+
 def test_unstack_policy():
     from sequence import UnstackFrame
     from stages.unstack import choose_blocker, choose_park, plan_unstack_move
@@ -631,6 +661,7 @@ def main():
     ]
     if not quick:
         results.append(test_wrist_localize())
+        results.append(test_look_fits_piece_shape())
         results.append(test_nest_stands_fallen())
         results.append(test_place_b5_no_collateral())
         results.append(test_nxb5_capture())

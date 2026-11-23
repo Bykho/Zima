@@ -49,6 +49,7 @@ from clearance import (
     obstacle_bodies,
 )
 from perception import estimate_target_pose, observe_piece
+from piece_fit import fit_upright_xy, piece_shape
 from sensor import capture as capture_wrist, robot_blocks_view, wrist_sees_point
 from stages.types import Move, Retry, Stop
 from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
@@ -1223,15 +1224,21 @@ def _verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
     target = square_to_world(square, cfg, z=surface)
     if _reach_observe(sim, cfg, target, tid) is None:
         return {"looked": False}
-    seen = observe_piece(capture_wrist(sim), cfg, square)
+    obs = capture_wrist(sim)
+    seen = observe_piece(obs, cfg, square)
     if seen is None:
         sim.forget(tid)
         return {"looked": True, "seen": False}
     height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
     upright = seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+    xy, fitted = seen["xy"], False
+    if upright:
+        fit = fit_upright_xy(obs, cfg, piece_shape(sim, tid), seen["xy"])
+        if fit is not None:
+            xy, fitted = fit["xy"], True
     quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
-    sim.believe(tid, [seen["xy"][0], seen["xy"][1], surface], quat)
-    return {"looked": True, "seen": True, "upright": upright, "top_h_mm": round(seen["top_h"] * 1000, 1), "xy": seen["xy"]}
+    sim.believe(tid, [xy[0], xy[1], surface], quat)
+    return {"looked": True, "seen": True, "upright": upright, "top_h_mm": round(seen["top_h"] * 1000, 1), "xy": xy, "fitted": fitted}
 
 
 VERIFY_UPRIGHT_FRAC = 0.7
