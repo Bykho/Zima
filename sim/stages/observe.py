@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from pickup import (
     _perceiving,
     _reach_observe,
@@ -14,25 +16,26 @@ from pickup import (
     queen_upright,
     verify_piece,
 )
-from occupancy import square_of_body
 from squares import nest_xyz, square_to_world
 from stages import register
 from stages.types import Fail, Move
 
 
-def _placed(sim, cfg: dict, tid: str, dest: str, dest_xy, surface: float, off_board: bool) -> bool:
-    """Is the released piece where it should be? The wrist camera judges when perceiving."""
+def _placed(sim, cfg: dict, tid: str, dest: str, dest_xy, surface: float, off_board: bool, xy_tol: float) -> tuple[bool, float | None]:
+    """Is the released piece where it should be, and how far off is it (mm)? The wrist camera judges when perceiving."""
+    xyz, quat = sim.object_pose(tid)
     if off_board:
-        return bool(bowl_contains(sim.object_pose(tid)[0], dest_xy))
+        return bool(bowl_contains(xyz, dest_xy)), None
     if _perceiving(sim):
         look = verify_piece(sim, cfg, tid, dest)
-        return bool(look.get("seen") and look.get("upright") and square_of_body(sim, cfg, tid) == dest)
-    _, quat = sim.object_pose(tid)
-    return bool(
-        square_of_body(sim, cfg, tid) == dest
-        and queen_upright(quat, tilt_max=0.5)
-        and object_on_board(sim, surface, object_id=tid)
-    )
+        if not look.get("seen"):
+            return False, None
+        standing = bool(look.get("upright"))
+        xyz, _ = sim.object_pose(tid)
+    else:
+        standing = bool(queen_upright(quat, tilt_max=0.5) and object_on_board(sim, surface, object_id=tid))
+    off = float(np.hypot(xyz[0] - dest_xy[0], xyz[1] - dest_xy[1]))
+    return bool(standing and off <= xy_tol), round(off * 1000.0, 1)
 
 
 def locate(m: Move):
@@ -80,7 +83,8 @@ def confirm(m: Move):
     """Placed? The robot's own check (wrist look at the destination), then the final phase log."""
     sim, cfg, result, tid, surface, dest, dest_xy, off_board, retreated, high = m.sim, m.cfg, m.result, m.tid, m.surface, m.dest, m.dest_xy, m.off_board, m.retreated, m.high
     still_held = bool(grasp_acquired(sim, tid) and float(sim.object_pose(tid)[0][2]) > surface + 0.012)
-    result["placement_success"] = _placed(sim, cfg, tid, dest, dest_xy, surface, off_board) and not still_held
+    placed, result["placed_off_mm"] = _placed(sim, cfg, tid, dest, dest_xy, surface, off_board, m.xy_tol)
+    result["placement_success"] = placed and not still_held
     result["retreat_success"] = bool(retreated)
     if not retreated:
         result["ik_fail_phase"] = "010_final"

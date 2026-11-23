@@ -842,6 +842,27 @@ def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface:
     return Retry(nxt, {"grasp_retry": True, "grasp_attempts": attempt + 2, "first_grasp_reason": failed.get("failure_reason")}, log)
 
 
+def _place_correction(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface: float) -> Retry | None:
+    """Re-grasp a standing piece where the confirm look saw it and place it on dest again.
+
+    The piece can shift in the jaws during the carry, so the in-hand belief
+    drifts; the post-release look measures the real offset and closes the loop.
+    """
+    done = int(sc.get("_place_correction", 0))
+    if done >= int(pickup_cfg(cfg).get("place_corrections", 2)):
+        return None
+    if not _piece_still_upright(sim, tid, surface, tilt_max=0.5):
+        return None
+    here = square_of_body(sim, cfg, tid)
+    if here is None:
+        return None
+    off_mm = failed.get("placed_off_mm")
+    log_state(sim, "retry_place", extra={"attempt": done + 1, "from": here, "off_mm": off_mm})
+    nxt = dict(sc, source=here, seed_home=False, reset_board=False, _grasp_attempt=0, _place_correction=done + 1)
+    nxt.setdefault("_first_place_off_mm", off_mm)
+    return Retry(nxt, {"place_corrections": done + 1, "first_place_off_mm": nxt["_first_place_off_mm"]})
+
+
 def _move_q_hold(sim: Sim, goal_arm: dict, closed: float, duration: float = 0.6) -> None:
     """Joint-space move that keeps commanding the goal pose (not the sagged qpos)."""
     start = {n: sim.qpos()[n] for n in ARM_JOINTS}
@@ -924,6 +945,10 @@ def _retry_policy(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface
             return None
         if reason == "RELEASE_FAILURE":
             return None
+        if reason == "PLACEMENT_POSITION_ERROR":
+            again = _place_correction(sim, cfg, sc, failed, tid, surface)
+            if again is not None:
+                return again
         if _perceiving(sim) and tid not in sim.known:
             stages.resolve(cfg)["board_observe"].scan(sim, cfg)
             if tid not in sim.known:
@@ -1215,7 +1240,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         # Pinch is on the exposed stem above the lip; 0.30 still wraps a crown.
         release_open = max(release_open, 0.40)
     place_hover = float(p.get("place_hover", 0.003))
-    xy_tol = float(p.get("place_xy_tol", 0.018))
+    xy_tol = float(p.get("place_xy_tol", 0.010))
     place_xyz = sc.get("place_xyz")
     off_board = place_xyz is not None
     if off_board:
@@ -1511,7 +1536,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     m = Move(sim, cfg, sc, result)
     for k, v in dict(p=p, tid=tid, source=source, dest=dest, use_vision=use_vision, geom=geom, surface=surface,
                      open_g=open_g, release_open=release_open, closed_g=closed_g, pre_z=pre_z, grasp_z=grasp_z,
-                     lift_z=lift_z, place_hover=place_hover, off_board=off_board, dest_xy=dest_xy).items():
+                     lift_z=lift_z, place_hover=place_hover, off_board=off_board, dest_xy=dest_xy, xy_tol=xy_tol).items():
         setattr(m, k, v)
     P = stages.resolve(cfg)
 

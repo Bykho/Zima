@@ -18,7 +18,11 @@ sim:
     lift_z: 0.08
     place_hover: 0.0
     release_lift_z: 0.08
-    place_xy_tol: 0.018
+    # Placement spec: piece centre within this of the square centre. The robot
+    # judges it from its own post-release look and corrects a miss.
+    place_xy_tol: 0.010
+    # Re-grasp-and-re-place tries for a piece the confirm look finds off-centre.
+    place_corrections: 2
     # 3/4 of the 0.8 full-open pose. Enough to clear a piece; the joint
     # stop (~1.75) slaps it. Approach may still narrow this for neighbors.
     gripper_open: 0.60
