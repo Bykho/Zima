@@ -13,9 +13,8 @@ joint written outside physics fails the next step.
 | wall | controller sees |
 |---|---|
 | `real` (default everywhere) | camera, joint encoders and gripper load only; its pieces are a belief built from wrist looks |
-| `perception` | same as `real` |
-| `cheat` | the true piece poses as its belief, actuated motion |
-| `off` | the world itself (no separation) |
+| `cheat` | the true piece poses as its belief and no wrist look: the perception-free control |
+| `off` | the world itself (no separation), true poses |
 
 Scores always come from the world (`evaluate_move.py`): a placed piece is at
 rest on the board (within 3 mm of the surface, not touching the robot),
@@ -121,8 +120,8 @@ python sim/game.py --game opera       # replay a famous game
 python sim/pickup.py --headless       # one pick-and-place, d1 -> d4
 ```
 
-All three default to `--wall real` and wrist vision; `--gt` uses the belief
-pose without a look (truth only on `cheat`/`off`).
+All three default to `--wall real` (wrist vision); `--wall cheat` runs the same
+move on true poses without a look.
 
 ## Old entry points
 

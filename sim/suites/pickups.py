@@ -1,9 +1,11 @@
 """Pickup suites from the old `bench.py` and `evaluate.py` studies, run through `episode.run_pickup` on a wall.
 
 matrix            piece x square on an empty board (`chess_scene_pieces.xml`, bare body names):
-                  every kind from each source square, the queen from d1 to each destination,
-                  and every kind by vision from six sources
-starting          pick-and-lift of every man on the full starting board, gt and vision
+                  every kind from each source square and the queen from d1 to each destination
+starting          pick-and-lift of every man on the full starting board
+
+The wall sets the pose source: `cheat` reads true poses (the perception-free control),
+`real` looks with the wrist camera.
 
 Queen grasp studies on `chess_scene.xml` (queen d1 -> d4, bare names):
 offsets           queen spawned off the d1 centre (1-D and 2-D offsets), pick-and-lift
@@ -25,7 +27,6 @@ import traceback
 import diag
 import runner
 
-VISION_SOURCES = ("d1", "c2", "d4", "a4", "d6", "h4")
 KINDS = ("pawn", "rook", "knight", "bishop", "queen", "king")
 
 
@@ -36,16 +37,13 @@ def _cases(prefix: str, scs: list[dict], **extra) -> list[dict]:
 def matrix_cases() -> list[dict]:
     from scenario import dest_reach_scenarios, empty_matrix_scenarios
 
-    vision = [sc for sc in empty_matrix_scenarios("vision") if sc["source"] in VISION_SOURCES]
-    return (_cases("empty_", empty_matrix_scenarios("gt")) + _cases("dest_", dest_reach_scenarios("gt"))
-            + _cases("empty_", vision))
+    return _cases("empty_", empty_matrix_scenarios()) + _cases("dest_", dest_reach_scenarios())
 
 
 def starting_cases() -> list[dict]:
     from scenario import starting_pickup_scenarios
 
-    return [{"id": f"pick_{sc['target_id']}_{sc['perception']}", "sc": sc}
-            for perc in ("gt", "vision") for sc in starting_pickup_scenarios(perc)]
+    return [{"id": f"pick_{sc['target_id']}", "sc": sc} for sc in starting_pickup_scenarios()]
 
 
 def offsets_cases() -> list[dict]:
@@ -77,7 +75,7 @@ def _head(case: dict, wall: str) -> dict:
 
     sc = case["sc"]
     row = {"id": case["id"], "wall": wall, "piece": body_kind(sc["target_id"]) or sc["target_id"], "target": sc["target_id"],
-           "source": sc["source"], "dest": sc["dest"], "perception": sc["perception"]}
+           "source": sc["source"], "dest": sc["dest"]}
     for k in ("offset_xy", "pose_error_xy"):
         if any(sc.get(k) or ()):
             row[k + "_mm"] = [round(float(v) * 1000, 1) for v in sc[k]]
@@ -176,11 +174,8 @@ def _run(case: dict, wall: str, xml: str) -> dict:
         if tracker is not None:
             row["neighbor_eval"] = tracker.finish()
     except Exception as e:  # noqa: BLE001 — a crash is a result
-        if type(e).__name__ == "GroundTruthAccess":  # a `gt` case on a wall without cheat_state
-            row.update(ok=False, claimed=False, reason="NOT_PERCEIVED", stage="perception", error=str(e)[:300])
-        else:
-            row.update(ok=False, claimed=False, reason=f"EXC {type(e).__name__}", stage="crash", error=str(e)[:300],
-                       trace=traceback.format_exc(limit=-6))
+        row.update(ok=False, claimed=False, reason=f"EXC {type(e).__name__}", stage="crash", error=str(e)[:300],
+                   trace=traceback.format_exc(limit=-6))
     row["t"] = round(time.time() - t0, 1)
     row["phases"] = runner.phase_times(phases, t0)
     return row
@@ -221,9 +216,8 @@ def report_matrix(rows: list[dict]) -> str:
     out = []
     for wall, rs in _walls(rows):
         for label, sub, key, squares in (
-            ("piece x source, empty board, gt", [r for r in rs if r["id"].startswith("empty_") and r["perception"] == "gt"], "source", SOURCE_SQUARES),
-            ("piece x source, empty board, vision", [r for r in rs if r["id"].startswith("empty_") and r["perception"] == "vision"], "source", VISION_SOURCES),
-            ("queen d1 x dest, gt", [r for r in rs if r["id"].startswith("dest_")], "dest", tuple(d for d in DEST_SQUARES if d != "d1")),
+            ("piece x source, empty board", [r for r in rs if r["id"].startswith("empty_")], "source", SOURCE_SQUARES),
+            ("queen d1 x dest", [r for r in rs if r["id"].startswith("dest_")], "dest", tuple(d for d in DEST_SQUARES if d != "d1")),
         ):
             if sub:
                 out += [f"\n[{wall}] {label}: {sum(r['ok'] for r in sub)}/{len(sub)}", *_grid(sub, list(squares), key)]
@@ -233,18 +227,15 @@ def report_matrix(rows: list[dict]) -> str:
 def report_starting(rows: list[dict]) -> str:
     out = []
     for wall, ws in _walls(rows):
-        for perc in ("gt", "vision"):
-            rs = {r["source"]: r for r in ws if r["perception"] == perc}
-            if not rs:
-                continue
-            out.append(f"\n[{wall}] starting pick+lift, {perc}: {sum(r['ok'] for r in rs.values())}/{len(rs)}   (P ok, F fail)")
-            out.append("     " + "  ".join("abcdefgh"))
-            for rank in "87654321":
-                marks = [("P" if rs[f + rank]["ok"] else "F") if f + rank in rs else "." for f in "abcdefgh"]
-                out.append(f"  {rank}  " + "  ".join(marks))
-            for sq, r in sorted(rs.items()):
-                if not r["ok"]:
-                    out.append(f"  {r['piece']:6s} {sq} {r.get('reason')} stage={r.get('stage')} hit={r.get('obstruction')} unstack={r.get('unstack')}")
+        rs = {r["source"]: r for r in ws}
+        out.append(f"\n[{wall}] starting pick+lift: {sum(r['ok'] for r in rs.values())}/{len(rs)}   (P ok, F fail)")
+        out.append("     " + "  ".join("abcdefgh"))
+        for rank in "87654321":
+            marks = [("P" if rs[f + rank]["ok"] else "F") if f + rank in rs else "." for f in "abcdefgh"]
+            out.append(f"  {rank}  " + "  ".join(marks))
+        for sq, r in sorted(rs.items()):
+            if not r["ok"]:
+                out.append(f"  {r['piece']:6s} {sq} {r.get('reason')} stage={r.get('stage')} hit={r.get('obstruction')} unstack={r.get('unstack')}")
     return "\n".join(out)
 
 

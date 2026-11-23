@@ -55,7 +55,7 @@ def gt(sim) -> Sim:
     raise GroundTruthAccess("control code read simulator truth; perception must supply this")
 
 
-WALLS = ("off", "cheat", "perception", "real")
+WALLS = ("off", "cheat", "real")
 
 
 def open_robot(world: Sim, wall: str = "cheat"):
@@ -63,7 +63,6 @@ def open_robot(world: Sim, wall: str = "cheat"):
 
     off         the world itself (no wall, legacy)
     cheat       Robot with perfect state, actuated motion
-    perception  same as real since the teleporting motion was removed (wall kept for old commands)
     real        state from perception only, actuated motion only
 
     Opening the robot starts the episode: the world's scene is locked, so from
@@ -77,11 +76,6 @@ def open_robot(world: Sim, wall: str = "cheat"):
     if wall == "cheat":
         return Robot(world, cheat_state=True)
     return Robot(world, cheat_state=False)
-
-
-def wall_perception(wall: str) -> str:
-    """Pose source for a move on `wall`: belief ("gt") is truth only where the wall gives truth; elsewhere look."""
-    return "gt" if wall in ("off", "cheat") else "vision"
 
 
 def jaw_squeezing(sim) -> bool:

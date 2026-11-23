@@ -419,12 +419,10 @@ def test_place_b5_no_collateral():
     out = execute_move(
         sim,
         cfg,
-        use_vision=False,
         scenario={
             "target_id": "pawn_b7",
             "source": "b7",
             "dest": "b5",
-            "perception": "gt",
             "quiet": True,
         },
     )
@@ -474,7 +472,7 @@ def test_nxb5_capture():
     for _ in range(40):
         sim.step()
     nb0 = {n: sim.object_pose(n)[0][:2].copy() for n in ("pawn_c7", "bishop_c1", "queen_d1")}
-    out = play_move(sim, cfg, "c3 b5", use_vision=False)
+    out = play_move(sim, cfg, "c3 b5")
     kn, kq = sim.object_pose("knight_b1")
     dest = square_to_world("b5", cfg)
     err = float(np.hypot(kn[0] - dest[0], kn[1] - dest[1]) * 1000)
@@ -530,7 +528,7 @@ def _queenside_capture(move: str, attacker: str, src: str, label: str):
     # The attacker itself is not a neighbor once it leaves src.
     neighbors = tuple(n for n in neighbors if n != attacker)
     nb0 = {n: sim.object_pose(n)[0][:2].copy() for n in neighbors}
-    out = play_move(sim, cfg, move, use_vision=False)
+    out = play_move(sim, cfg, move)
     kn, kq = sim.object_pose(attacker)
     dest = square_to_world("b5", cfg)
     err = float(np.hypot(kn[0] - dest[0], kn[1] - dest[1]) * 1000)
@@ -582,12 +580,10 @@ def test_queen_near_base_place():
     out = execute_move(
         sim,
         cfg,
-        use_vision=False,
         scenario={
             "target_id": "queen_d1",
             "source": "f3",
             "dest": "b3",
-            "perception": "gt",
             "quiet": True,
         },
     )

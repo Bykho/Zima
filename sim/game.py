@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Replay a famous game on the live stack.
 
-  python sim/game.py --gt              # viewer, real-time, ground truth
-  mjpython sim/game.py --gt            # macOS
-  python sim/game.py --gt --headless   # no window (1x clock; --speed 2 to hurry)
-  python sim/game.py --gt --game opera
-  python sim/game.py --gt --speed 2    # viewer, sped-up video clock
-  mjpython sim/game.py --gt --keep-going   # do not stop on a scored fail
+  python sim/game.py                   # viewer, real-time, wrist camera (wall real)
+  mjpython sim/game.py                 # macOS
+  python sim/game.py --headless        # no window (1x clock; --speed 2 to hurry)
+  python sim/game.py --wall cheat      # true poses, no wrist look
+  python sim/game.py --game opera --speed 2
+  mjpython sim/game.py --keep-going    # do not stop on a scored fail
 
 Default is Morphy's Opera Game. Stops at the first physical failure
 unless `--keep-going`.
@@ -147,7 +147,7 @@ def _reexec_mjpython() -> None:
     if mjpython is None:
         raise SystemExit(
             "On macOS the viewer needs mjpython (pip install mujoco provides it). "
-            "Run:  .venv/bin/mjpython sim/game.py --gt"
+            "Run:  .venv/bin/mjpython sim/game.py"
         )
     os.execv(str(mjpython), [str(mjpython), *sys.argv])
 
@@ -180,8 +180,6 @@ def _hook_viewer(sim: Sim, viewer) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Engine game replayed on the sim board")
-    parser.add_argument("--gt", action="store_true", help="belief pose without a wrist look (truth only under --wall cheat/off)")
-    parser.add_argument("--vision", action="store_true", help="wrist RGB-D (the default; kept for old commands)")
     parser.add_argument("--game", default="opera", help="famous game: opera, immortal, evergreen")
     parser.add_argument("--max-ply", type=int, default=80)
     parser.add_argument("--headless", action="store_true", help="no viewer")
@@ -195,7 +193,6 @@ def main() -> int:
     stages.cli_arg(parser)
     args = parser.parse_args()
     stages.select(args.stage)
-    use_vision = not args.gt
     want_view = not args.headless
     if args.speed is not None:
         clock = float(args.speed) if args.speed >= 1.0 else 1.0 / max(0.05, float(args.speed))
@@ -215,7 +212,7 @@ def main() -> int:
     replay = chess.Board()
     print(f"game  {_game_label(game)}  ply={len(moves)}  result={final.result()}")
     print(replay.variation_san(moves))
-    print(f"perception: {'wrist RGB-D' if use_vision else 'belief (gt)'}  wall: {args.wall}")
+    print(f"perception: {'true poses' if args.wall in ('cheat', 'off') else 'wrist RGB-D'}  wall: {args.wall}")
     print(f"clock: {clock_scale()}x  viewer: {'on' if want_view else 'off'}")
     if args.keep_going:
         print("keep-going: on  (scored fails do not stop the game)")
@@ -269,7 +266,6 @@ def main() -> int:
                         sim,
                         cfg,
                         hide,
-                        use_vision=use_vision,
                         keep_squares={legs[0][0]} if legs else set(),
                     )
                     if not dumped.get("success"):
@@ -295,7 +291,7 @@ def main() -> int:
                         continue
                 for src, dst in legs:
                     _hook_viewer(sim, viewer)
-                    last = play_move(sim, cfg, f"{src} {dst}", use_vision=use_vision)
+                    last = play_move(sim, cfg, f"{src} {dst}")
                     _sync_viewer(viewer)
                     _hook_viewer(sim, viewer)
                     if not last.get("success"):

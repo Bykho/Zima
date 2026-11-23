@@ -109,7 +109,6 @@ def scenario(**kwargs) -> dict:
         "offset_xy": [0.0, 0.0],
         "yaw_deg": 0.0,
         "geometry": QUEEN_GEOM,
-        "perception": "gt",
         "seed": 0,
         "quiet": False,
     }
@@ -227,15 +226,14 @@ def full_board_scenario(**kwargs) -> dict:
     return scenario(**kw)
 
 
-def piece_scenario(kind: str, source: str, dest: str, perception: str = "gt", **kwargs) -> dict:
+def piece_scenario(kind: str, source: str, dest: str, **kwargs) -> dict:
     geom = dict(PIECES[kind])
     kw = dict(
-        name=kwargs.pop("name", f"{kind}_{source}_{dest}_{perception}"),
+        name=kwargs.pop("name", f"{kind}_{source}_{dest}"),
         target_id=kwargs.pop("target_id", kind),
         source=source,
         dest=dest,
         geometry=geom,
-        perception=perception,
         grasp_xy_offset=list(geom["grasp_xy_offset"]),
         quiet=kwargs.pop("quiet", True),
     )
@@ -247,18 +245,18 @@ def _default_dest(source: str) -> str:
     return "e4" if source == "d4" else "d4"
 
 
-def empty_matrix_scenarios(perception: str = "gt") -> list[dict]:
+def empty_matrix_scenarios() -> list[dict]:
     """One dest per source so the sweep stays broad without a full cartesian product."""
     cases = []
     for kind in PIECE_BODIES:
         for src in SOURCE_SQUARES:
-            cases.append(piece_scenario(kind, src, _default_dest(src), perception=perception))
+            cases.append(piece_scenario(kind, src, _default_dest(src)))
     return cases
 
 
-def dest_reach_scenarios(perception: str = "gt") -> list[dict]:
+def dest_reach_scenarios() -> list[dict]:
     """Queen from d1 onto each representative dest — workspace/placement map."""
-    return [piece_scenario("queen", "d1", dest, perception=perception) for dest in DEST_SQUARES if dest != "d1"]
+    return [piece_scenario("queen", "d1", dest) for dest in DEST_SQUARES if dest != "d1"]
 
 
 # Standard chess starting squares. Full-board XML has one free body per square:
@@ -323,7 +321,7 @@ def is_piece_body(name: str) -> bool:
     return body_kind(name) is not None
 
 
-def starting_pickup_scenarios(perception: str = "gt", dest: str = "d4", stop_after: str | None = "lift") -> list[dict]:
+def starting_pickup_scenarios(dest: str = "d4", stop_after: str | None = "lift") -> list[dict]:
     """Pickup (+ optional lift-only) every starting piece against full clutter."""
     cases = []
     for kind, src in STARTING_POSITION:
@@ -333,8 +331,7 @@ def starting_pickup_scenarios(perception: str = "gt", dest: str = "d4", stop_aft
                 kind,
                 src,
                 dest,
-                perception=perception,
-                name=f"start_{tag}_{kind}_{src}_{dest}_{perception}",
+                name=f"start_{tag}_{kind}_{src}_{dest}",
                 populated=True,
                 stop_after=stop_after,
                 target_id=starting_body(kind, src),

@@ -56,12 +56,12 @@ def _pickups(name: str) -> Suite:
     if name == "matrix":
         return Suite(cases=pickups.matrix_cases, run=pickups.run_matrix, fail_row=pickups.fail_row,
                      about="piece x square on an empty board (chess_scene_pieces.xml)", report=pickups.report_matrix,
-                     quick=("empty_pawn_d1_d4_gt", "empty_queen_d4_e4_gt", "empty_knight_a4_d4_gt",
-                            "dest_queen_d1_h6_gt", "empty_queen_d1_d4_vision"))
+                     quick=("empty_pawn_d1_d4", "empty_queen_d4_e4", "empty_knight_a4_d4", "dest_queen_d1_h6",
+                            "empty_queen_d1_d4"))
     if name == "starting":
         return Suite(cases=pickups.starting_cases, run=pickups.run_starting, fail_row=pickups.fail_row, timeout=150.0,
-                     about="pick-and-lift of every man on the starting board, gt + vision", report=pickups.report_starting,
-                     record_walls=(), quick=("pick_queen_d1_gt", "pick_pawn_a2_gt", "pick_king_e1_gt", "pick_queen_d1_vision"))
+                     about="pick-and-lift of every man on the starting board", report=pickups.report_starting,
+                     quick=("pick_queen_d1", "pick_pawn_a2", "pick_king_e1"))
     cases, about, quick = {
         "offsets": (pickups.offsets_cases, "queen spawned off the d1 centre, pick-and-lift (chess_scene.xml)",
                     ("pos_x_+0mm", "pos_x_+10mm", "pos_xy_+5_+5mm")),

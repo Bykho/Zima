@@ -180,7 +180,7 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
         occ, before = evaluate_move.board_snapshot(world, cfg)
         mover, victim = occ.get(src), occ.get(dst)
         t_setup = time.time()
-        r = episode.play_move(sim, cfg, case["move"], use_vision=True)
+        r = episode.play_move(sim, cfg, case["move"])
         row["t_move"] = round(time.time() - t_setup, 1)
         score = evaluate_move.score_board_move(world, cfg, before, mover, victim, dst)
         ok = score["ok"]
