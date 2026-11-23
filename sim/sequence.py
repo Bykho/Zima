@@ -14,7 +14,7 @@ from clearance import neighbor_squares, obstacle_bodies, plan_approach
 from ik import EE_SITE, grasp_xy_delta, solve_ik
 from mj import probing
 from scenario import PIECES, STARTING_AT, body_kind, is_piece_body
-from squares import FILES, parse_square, square_to_world
+from squares import FILES, square_to_world
 
 
 @dataclass(frozen=True)
@@ -73,11 +73,6 @@ def square_of_body(sim, cfg: dict, name: str) -> str | None:
     return None
 
 
-def restore_order(moves: list[Move]) -> list[Move]:
-    """LIFO restore: park → home for each unstack move, last parked first."""
-    return [Move(kind=m.kind, src=m.dst, dst=m.src) for m in reversed(moves)]
-
-
 _SQUARE_GRID: dict[tuple, tuple[list[str], np.ndarray]] = {}
 
 
@@ -103,20 +98,6 @@ def _snap_square(cfg: dict, xy, size: float) -> str | None:
     d = np.hypot(pts[:, 0] - float(xy[0]), pts[:, 1] - float(xy[1]))
     i = int(np.argmin(d))
     return names[i] if d[i] < 0.55 * size else None
-
-
-def forward_blockers(source: str, occ: dict[str, str], skip_kinds: set[str]) -> list[str]:
-    """Occupied neighbors one rank toward the board center, not same-type."""
-    fi, rank = parse_square(source)
-    toward = 1 if rank <= 4 else -1
-    out = []
-    for sq, body in occ.items():
-        if piece_kind(sq, body) in skip_kinds:
-            continue
-        f2, r2 = parse_square(sq)
-        if r2 == rank + toward and abs(f2 - fi) <= 1:
-            out.append(sq)
-    return out
 
 
 @probing

@@ -324,7 +324,6 @@ def physical_descend(sim: Sim, target, duration: float = 1.2, lock_joints=(), pa
 def run(m: Move):
     """Plan the approach, reach pregrasp, re-look and re-verify, descend to the grasp."""
     sim, cfg, sc, result, tid, surface, source, use_vision, queen_xyz, grasp_z, geom, open_g, plan_xy, grasp_xy, pre, actual = m.sim, m.cfg, m.sc, m.result, m.tid, m.surface, m.source, m.use_vision, m.queen_xyz, m.grasp_z, m.geom, m.open_g, m.plan_xy, m.grasp_xy, m.pre, m.actual
-    result["transport_path"] = "straight"
     clutter = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
     result["occupied_neighbors"] = sorted(clutter)
     grasp_plan = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
@@ -469,7 +468,6 @@ def run(m: Move):
     ]
     grasp = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
     result["ee_requested"] = _xyz(grasp)
-    result["transport_path"] = "straight"
     column = _descend_column(sim, grasp, grasp_lock)
     result["descend_column"] = column is not None or getattr(sim, "plumb_fail", None)
     desc = physical_descend(

@@ -151,7 +151,7 @@ def test_wrist_localize():
 
 
 def test_unstack_policy():
-    from sequence import Move, UnstackFrame, forward_blockers, restore_order
+    from sequence import UnstackFrame
     from stages.unstack import choose_blocker, choose_park, plan_unstack_move
 
     occ = {"g1": "knight_g1", "g2": "pawn_g2", "h2": "pawn_h2"}
@@ -168,16 +168,6 @@ def test_unstack_policy():
     ok_park = check("unstack parks a quiet empty square", park == "f4", f"park={park}")
     home2 = choose_blocker("a2", {"a1": "rook_a1", "b2": "pawn_b2"}, {"a2"}, {"pawn"})
     ok_skip = check("unstack skips same type", home2 == "a1", f"home={home2}")
-    moves = [
-        Move("pawn", "g2", "d3"),
-        Move("knight", "g1", "e3"),
-    ]
-    rest = restore_order(moves)
-    ok_lifo = check(
-        "unstack LIFO restore list",
-        rest[0].src == "e3" and rest[0].dst == "g1" and rest[1].src == "d3" and rest[1].dst == "g2",
-        f"rest={[ (m.kind, m.src, m.dst) for m in rest ]}",
-    )
     planned = plan_unstack_move("h1", "rook", occ, {"h1", "d4"}, {"rook"}, occupied)
     ok_plan = check(
         "plan_unstack_move parks pawn",
@@ -190,10 +180,6 @@ def test_unstack_policy():
     ]
     last = stack.pop()
     ok_frame = check("unstack LIFO restore", last.kind == "knight" and last.home == "g1", last.home)
-    front = forward_blockers("g1", {"g2": "pawn_g2", "f1": "bishop_f1", "h2": "pawn_h2"}, {"knight"})
-    ok_front = check("forward blockers are center-rank pawns", set(front) == {"g2", "h2"}, f"front={front}")
-    none = forward_blockers("a2", {"a1": "rook_a1", "b2": "pawn_b2"}, {"pawn"})
-    ok_none = check("forward blockers skip same type", none == [], f"front={none}")
     from pickup import bowl_contains, in_trash, in_well
 
     ok_bowl = check(
@@ -210,7 +196,7 @@ def test_unstack_policy():
         "well occupants are off-board, not board collateral",
         in_well([0.22, -0.26, 0.024], cfg) and not in_well([0.351, 0.006, 0.02], cfg),
     )
-    return ok_pawn and ok_park and ok_skip and ok_lifo and ok_plan and ok_frame and ok_front and ok_none and ok_bowl and ok_trash and ok_well
+    return ok_pawn and ok_park and ok_skip and ok_plan and ok_frame and ok_bowl and ok_trash and ok_well
 
 
 def test_home_clears_pieces():
@@ -306,17 +292,20 @@ def test_reachable_approach_near_base():
 
 
 def test_column_descend_tracks_xy():
+    """The live descend: `_descend_column` plans a plumb chain straight down; following it holds XY."""
     import numpy as np
-    from ik import EE_SITE, servo_lin
+    from ik import EE_SITE, move_ik
     from pickup import seed_vertical
+    from stages.approach import _descend_column, _follow_q_path
 
     cfg = load_config()
     sim = Sim(cfg=cfg)
     seed_vertical(sim, cfg)
     xy = square_to_world("d4", cfg)
-    high = [xy[0], xy[1], 0.12]
-    low = [xy[0], xy[1], 0.05]
-    ok_ik = _pose_by_ik(sim, high, lock_joints=("wrist_flex",))
+    high = [xy[0], xy[1], 0.08]
+    low = [xy[0], xy[1], 0.03]
+    ok_ik = move_ik(sim, high, duration=1.0, physics=True, down=True)
+    down = _descend_column(sim, low, ())
     drift = [0.0]
     z0 = [None]
     prev = sim.on_step
@@ -331,17 +320,15 @@ def test_column_descend_tracks_xy():
             drift[0] = max(drift[0], float(np.hypot(ee[0] - xy[0], ee[1] - xy[1])))
 
     sim.on_step = _hook
-    ok_move = servo_lin(
-        sim, low, physics=True, lock_joints=("wrist_flex",), column=True, ref=low
-    )
+    ok_move = down is not None and _follow_q_path(sim, down, 1.2)
     ee, _ = sim.site_pose(EE_SITE)
-    z_err = abs(float(ee[2]) - 0.05)
+    z_err = abs(float(ee[2]) - low[2])
     sim.close()
     ok = bool(ok_ik) and bool(ok_move) and drift[0] < 0.006 and z_err < 0.015
     return check(
         "column descend holds XY",
         ok,
-        f"xy_drift={drift[0]*1000:.1f}mm z_err={z_err*1000:.1f}mm",
+        f"planned={down is not None} xy_drift={drift[0]*1000:.1f}mm z_err={z_err*1000:.1f}mm",
     )
 
 

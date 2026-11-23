@@ -1278,7 +1278,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         "ik_solved": False,
         "approach_reached": False,
         "approach_ok": False,
-        "transport_path": None,
         "first_collision": None,
         "transit_z": None,
         "transit_z_derived": None,
