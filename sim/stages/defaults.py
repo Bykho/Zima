@@ -6,16 +6,6 @@ from stages import register
 
 
 
-@register("carry", "plumb_then_legacy")
-class PlumbThenLegacy:
-    """Lift, transport and lower over the destination: plumb plan first, legacy lift/transport/lower otherwise."""
-
-    def carry(self, m):
-        import pickup
-
-        return pickup._stage_carry(m)
-
-
 @register("release", "open_at_place")
 class OpenAtPlace:
     """Open to the release aperture at the place pose."""
