@@ -817,15 +817,34 @@ def _backoff_grasp(sim: Sim, cfg: dict, tid: str, release_open: float) -> None:
     settle_queen(sim, steps=16)
 
 
+def _reperceive(sim: Sim, cfg: dict, tid: str, near: str | None) -> str | None:
+    """After a drop the in-hand belief is stale: look where it fell, scan the board if it is not there.
+
+    Returns the square the piece was seen on, or None if it is off the board or not found.
+    """
+    near = square_of_body(sim, cfg, tid) or near
+    if near and verify_piece(sim, cfg, tid, near).get("seen"):
+        return square_of_body(sim, cfg, tid)
+    stages.resolve(cfg)["board_observe"].scan(sim, cfg)
+    return square_of_body(sim, cfg, tid) if tid in sim.known else None
+
+
 def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface: float, release_open: float) -> Retry | None:
     """Pick again from the current pose after a miss/drop, if the piece is still up."""
     attempt = int(sc.get("_grasp_attempt", 0))
     budget = int(pickup_cfg(cfg).get("grasp_retries", 1))
     if attempt >= budget:
         return None
-    if not _piece_still_upright(sim, tid, surface, tilt_max=1.0):
+    here = sc.get("source")
+    if _perceiving(sim):
+        _backoff_grasp(sim, cfg, tid, release_open)
+        here = _reperceive(sim, cfg, tid, here)
+        if here is None:
+            return None
+    elif not _piece_still_upright(sim, tid, surface, tilt_max=1.0):
         return None
-    _backoff_grasp(sim, cfg, tid, release_open)
+    else:
+        _backoff_grasp(sim, cfg, tid, release_open)
     if not _piece_still_upright(sim, tid, surface, tilt_max=0.5):
         return None
     log_state(
@@ -833,7 +852,7 @@ def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface:
         "retry_grasp",
         extra={"attempt": attempt + 2, "after": failed.get("failure_reason")},
     )
-    nxt = dict(sc)
+    nxt = dict(sc, source=here)
     nxt["seed_home"] = False
     nxt["reset_board"] = False
     nxt["_grasp_attempt"] = attempt + 1
@@ -916,6 +935,11 @@ def _retry_policy(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface
             if again is not None:
                 return again
         dest = sc.get("dest")
+        here = sc.get("source")
+        if reason == "TRANSPORT_DROP" and _perceiving(sim):
+            here = _reperceive(sim, cfg, tid, here)
+            if here is None:
+                return None
         # Carry can drop a standing man a square short (Bxf3 → g3). Re-pick
         # from here; a nest scoop is for pieces that are actually down.
         # Bowl dumps use dest=source, so "already on dest" still means retry.
@@ -933,7 +957,7 @@ def _retry_policy(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface
             and _piece_still_upright(sim, tid, surface, tilt_max=0.5)
             and (sc.get("place_xyz") is not None or not on_dest)
         ):
-            nxt = dict(sc)
+            nxt = dict(sc, source=here)
             nxt["seed_home"] = True
             nxt["reset_board"] = False
             nxt["_from_nest"] = False
