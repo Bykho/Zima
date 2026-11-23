@@ -53,7 +53,7 @@ from clearance import (
     verify_approach,
 )
 from perception import estimate_target_pose, observe_piece
-from sensor import capture as capture_wrist, wrist_sees_point
+from sensor import capture as capture_wrist, robot_blocks_view, wrist_sees_point
 from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
@@ -2655,15 +2655,28 @@ def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
     )
 
 
+def _own_hand_hides(sim: Sim, target_xyz) -> bool:
+    """The robot's own links cover the line of sight to the column a piece on
+    target_xyz could fill; its top would read low (lying)."""
+    base = np.asarray(target_xyz, dtype=float)
+    top = base + np.array([0.0, 0.0, max(float(s["height"]) for s in PIECES.values())])
+    return any(robot_blocks_view(sim, p, _robot_bid_array(sim)) for p in (base, top))
+
+
 def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | None:
     """Move to a wrist pose that sees target_xyz. Raise or reseeds if stuck."""
     lock = ("wrist_flex", "wrist_roll")
     obstacles = obstacle_bodies(sim, skip={tid})
 
     def _try(looks, duration: float) -> list[float] | None:
+        hidden = None
         for look in looks:
             if _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=duration):
-                return look
+                if not _own_hand_hides(sim, target_xyz):
+                    return look
+                hidden = hidden or look
+        if hidden is not None and _safe_lin(sim, hidden, cfg, lock, obstacles=obstacles, skip={tid}, duration=duration):
+            return hidden
         return None
 
     hit = _try(find_observe_poses(sim, cfg, target_xyz), 0.8)
@@ -2715,9 +2728,11 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
         seen = observe_piece(obs, cfg, square, grow=1.0)
         height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
-        upright = seen is None or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+        hidden = _own_hand_hides(sim, square_to_world(square, cfg, z=surface))
+        upright = seen is None or hidden or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
         quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
         result["observed_top_h_mm"] = None if seen is None else round(seen["top_h"] * 1000, 1)
+        result["observe_hidden"] = hidden
         sim.believe(tid, [float(est[0]), float(est[1]), surface], quat)
     err = float(np.linalg.norm(est[:2] - gt[:2]))
     result["estimated_position_error_mm"] = err * 1000.0

@@ -52,6 +52,26 @@ def wrist_sees_point(sim, xyz, camera: str = DEFAULT_CAMERA) -> bool:
     return 4.0 <= u < w - 4.0 and 4.0 <= v < h - 4.0
 
 
+def robot_blocks_view(sim, xyz, robot_bodies, camera: str = DEFAULT_CAMERA) -> bool:
+    """True if one of the robot's own links is on the line of sight from the
+    wrist camera to world XYZ (the jaws hang in its view)."""
+    import mujoco
+
+    cid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, camera)
+    mujoco.mj_forward(sim.model, sim.data)
+    _, t = _mujoco_cv_extrinsics(sim, camera)
+    vec = np.asarray(xyz, dtype=np.float64) - t
+    reach = float(np.linalg.norm(vec))
+    if reach < 1e-6:
+        return False
+    vec /= reach
+    geom = np.zeros(1, dtype=np.int32)
+    d = mujoco.mj_ray(sim.model, sim.data, t, vec, None, 0, int(sim.model.cam_bodyid[cid]), geom)
+    if d < 0 or d >= reach - 0.002 or geom[0] < 0:
+        return False
+    return int(sim.model.geom_bodyid[geom[0]]) in set(int(b) for b in robot_bodies)
+
+
 def capture(sim, width: int | None = None, height: int | None = None, camera: str = DEFAULT_CAMERA) -> RgbdObservation:
     """Current backend: simulated D405 on the SO-ARM wrist."""
     cam_cfg = (sim.cfg or {}).get("sim", {}).get("camera", {})

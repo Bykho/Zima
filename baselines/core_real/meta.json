@@ -1,5 +1,5 @@
 {
-  "tag": "retreat4",
+  "tag": "lying1",
   "suites": [
     "core"
   ],
@@ -11,10 +11,10 @@
   "only": [],
   "ids": null,
   "episodes": 104,
-  "started": "2026-11-23T07:44:25",
-  "commit": "482852515e4a061103c1a7413a90ce559c0b0846",
+  "started": "2026-11-23T08:08:40",
+  "commit": "eaba760a62d12ee1dd3de425d217484cc9dce3bc",
   "dirty": true,
-  "diff_sha": "a14c76e8de6e7ea7",
+  "diff_sha": "ef514fa00e85c9bc",
   "config_sha": "3138c86592fe6fe0",
   "host": "cursor",
   "platform": "Linux-6.12.113+-x86_64-with-glibc2.39",
@@ -34,10 +34,10 @@
     "--jobs",
     "4",
     "--tag",
-    "retreat4"
+    "lying1"
   ],
-  "finished": "2026-11-23T07:50:17",
-  "wall_clock_s": 352,
+  "finished": "2026-11-23T08:14:33",
+  "wall_clock_s": 353,
   "baseline": "core_real",
-  "from_run": "retreat4"
+  "from_run": "lying1"
 }
