@@ -24,8 +24,17 @@ UPRIGHT_FRAC = 0.7
 LOST_COST_M = 0.1  # a forgotten body's last-seen spot ranks behind any current belief
 
 
-def _white_body(name: str) -> bool:
-    return name.split("_")[1][1] in "12"
+def _white_body(name: str) -> bool | None:
+    """Colour from a `{kind}_{square}` body's home rank; None for bare-name scenes (colour unknown)."""
+    parts = name.split("_")
+    if len(parts) < 2 or len(parts[1]) < 2:
+        return None
+    return parts[1][1] in "12"
+
+
+def _colour_fits(name: str, white: bool | None) -> bool:
+    body = _white_body(name)
+    return white is None or body is None or body == white
 
 
 def _piece_bodies(sim) -> list[str]:
@@ -97,7 +106,7 @@ def associate(sim, cfg: dict, pieces: list[dict]) -> dict[str, str]:
         for b in bodies:
             if p["upright"] and body_kind(b) != p["kind"]:
                 continue
-            if p["white"] is not None and _white_body(b) != p["white"]:
+            if not _colour_fits(b, p["white"]):
                 continue
             if b in prior:
                 cost = float(np.linalg.norm(prior[b] - xy))
@@ -116,7 +125,7 @@ def associate(sim, cfg: dict, pieces: list[dict]) -> dict[str, str]:
     for i, p in enumerate(pieces):
         if i in body_of:
             continue
-        spare = sorted(b for b in free if p["white"] is None or _white_body(b) == p["white"]) or sorted(free)
+        spare = sorted(b for b in free if _colour_fits(b, p["white"])) or sorted(free)
         if spare:
             body_of[i] = spare[0]
             free.discard(spare[0])
