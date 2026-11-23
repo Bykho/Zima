@@ -6,16 +6,6 @@ from stages import register
 
 
 
-@register("close", "load_check")
-class LoadCheck:
-    """Close the jaws; the grasp counts from gripper load."""
-
-    def close(self, m):
-        import pickup
-
-        return pickup._stage_close(m)
-
-
 @register("carry", "plumb_then_legacy")
 class PlumbThenLegacy:
     """Lift, transport and lower over the destination: plumb plan first, legacy lift/transport/lower otherwise."""

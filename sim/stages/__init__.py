@@ -72,7 +72,7 @@ def resolve(cfg: dict | None, pipeline: dict | None = None) -> dict[str, object]
     return out
 
 
-MODULES = ("defaults", "observe", "grasp_plan", "approach")
+MODULES = ("defaults", "observe", "grasp_plan", "approach", "close")
 
 
 def _load() -> None:
