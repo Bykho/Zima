@@ -1,6 +1,7 @@
 {
-  "tag": "rb_all",
+  "tag": "pl2_all",
   "suites": [
+    "core",
     "grasp",
     "matrix",
     "neighbors",
@@ -9,18 +10,24 @@
     "transport"
   ],
   "walls": [
-    "cheat",
-    "real"
+    "real",
+    "cheat"
   ],
   "jobs": 4,
   "only": [],
   "ids": null,
-  "episodes": 630,
-  "started": "2026-11-23T08:39:45",
-  "commit": "949bee65494a7b9cb319dea6abc7eb9dc54e1a0d",
+  "episodes": 734,
+  "variants": [
+    {
+      "label": "base",
+      "pipeline": ""
+    }
+  ],
+  "started": "2026-11-23T10:18:13",
+  "commit": "65e75a7a3ea012e8792b6cc3babb4e25698a1b1f",
   "dirty": false,
   "diff_sha": null,
-  "config_sha": "3138c86592fe6fe0",
+  "config_sha": "740694d4c8cde00e",
   "host": "cursor",
   "platform": "Linux-6.12.113+-x86_64-with-glibc2.39",
   "machine": "x86_64",
@@ -33,16 +40,16 @@
   "argv": [
     "sim/run.py",
     "--suite",
-    "grasp,matrix,neighbors,offsets,perception_error,transport",
+    "core,grasp,matrix,neighbors,offsets,perception_error,transport",
     "--walls",
-    "cheat,real",
+    "real,cheat",
     "--jobs",
     "4",
     "--tag",
-    "rb_all"
+    "pl2_all"
   ],
-  "finished": "2026-11-23T08:46:34",
-  "wall_clock_s": 409,
+  "finished": "2026-11-23T10:31:30",
+  "wall_clock_s": 798,
   "baseline": "neighbors_real",
-  "from_run": "rb_all"
+  "from_run": "pl2_all"
 }
