@@ -11,7 +11,9 @@ import os
 import signal
 import time
 import traceback
+from contextlib import ExitStack
 
+import diag
 import runner
 from evaluate_move import tilt_deg as _tilt_deg
 
@@ -117,25 +119,28 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
     row = {"id": case["id"], "move": case["move"], "wall": wall, "plies_before": len(case["setup"])}
     t0 = time.time()
     phases: list[tuple[str, float]] = []
+    stack = ExitStack()
     signal.alarm(int(timeout))
     try:
         import numpy as np
 
         import episode
         import evaluate_move
-        import perceive
         import pickup
         from mj import Sim, load_config
         from robot import jaw_squeezing, open_robot, world_of
         from squares import square_to_world
 
-        orig_log = pickup.log_state
-
         track: list[list] = []
         close: list[dict] = []
+        looks: list[dict] = []
         row["close"] = close
+        row["looks"] = looks
+        row["track"] = track
+        cfg = load_config()
+        tilt_before: list[float] = []
 
-        def _log(sim, name, extra=None):
+        def _phase(sim, name, extra):
             phases.append((name, time.time()))
             runner.send_phase(name)
             tid = getattr(sim, "target_id", None)
@@ -149,35 +154,20 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
                 pass
             if name in ("005_gripper_closed", "006_lift") and tid:
                 close.append(_pads_in_piece(world_of(sim), tid) | {"phase": name, "tilt": round(_tilt_deg(world_of(sim).object_pose(tid)[1]), 1), "extra": extra, "squeezing": bool(jaw_squeezing(sim))})
-            return orig_log(sim, name, extra)
 
-        pickup.log_state = _log
-        orig_scan = perceive.perceive_board
+        def _on(kind, sim, name, data):
+            if kind == "phase":
+                _phase(sim, name, data.get("extra"))
+            elif kind in ("scan_start", "scan_end"):
+                phases.append(("scan_start" if kind == "scan_start" else "scan", time.time()))
+            elif kind == "look_start":
+                tilt_before.append(round(_tilt_deg(world_of(sim).object_pose(data["tid"])[1]), 1))
+            elif kind == "look":
+                q, quat = world_of(sim).object_pose(data["tid"])
+                looks.append({"look": {k: v for k, v in data["out"].items() if k != "xy"}, "tilt_before": tilt_before.pop(), "world_tilt": round(_tilt_deg(quat), 1),
+                              "world_off_mm": round(float(np.hypot(*(np.asarray(q[:2]) - np.asarray(square_to_world(data["square"], cfg)[:2])))) * 1000, 1)})
 
-        def _scan(sim, cfg, refine=True):
-            phases.append(("scan_start", time.time()))
-            out = orig_scan(sim, cfg, refine)
-            phases.append(("scan", time.time()))
-            return out
-
-        perceive.perceive_board = _scan
-
-        looks: list[dict] = []
-        orig_verify = pickup.verify_piece
-
-        def _verify(sim, cfg, tid, square):
-            before = round(_tilt_deg(world_of(sim).object_pose(tid)[1]), 1)
-            out = orig_verify(sim, cfg, tid, square)
-            q, quat = world_of(sim).object_pose(tid)
-            looks.append({"look": {k: v for k, v in out.items() if k != "xy"}, "tilt_before": before, "world_tilt": round(_tilt_deg(quat), 1),
-                          "world_off_mm": round(float(np.hypot(*(np.asarray(q[:2]) - np.asarray(square_to_world(square, cfg)[:2])))) * 1000, 1)})
-            return out
-
-        pickup.verify_piece = _verify
-        row["looks"] = looks
-        row["track"] = track
-
-        cfg = load_config()
+        stack.enter_context(diag.subscribe(_on))
         world = Sim(xml_path=pickup.FULL_BOARD_XML, cfg=cfg)
         _setup_world(world, cfg, case["setup"])
         world.step(60)
@@ -220,6 +210,7 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
                    trace=traceback.format_exc(limit=-6))
     finally:
         signal.alarm(0)
+        stack.close()
     row["t"] = round(time.time() - t0, 1)
     row["phases"] = runner.phase_times(phases, t0)
     return row

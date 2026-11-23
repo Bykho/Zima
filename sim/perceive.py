@@ -13,10 +13,10 @@ import math
 
 import numpy as np
 
+import diag
 import scan
 from scenario import PIECES, body_kind
 from sensor import capture
-from squares import square_to_world
 
 LOOK_AGAIN_SEEN = 0.5  # classify patch less covered than this → close look
 LOOK_AGAIN_MARGIN_M = 0.001
@@ -61,6 +61,13 @@ def classify_board(sim, cfg: dict, board: scan.Scan) -> list[dict]:
 
 def perceive_board(sim, cfg: dict, refine: bool = True) -> dict:
     """Scan, classify, and write the result into the belief. Arm ends at the last scan pose."""
+    diag.emit("scan_start", sim)
+    out = _perceive_board(sim, cfg, refine)
+    diag.emit("scan_end", sim)
+    return out
+
+
+def _perceive_board(sim, cfg: dict, refine: bool) -> dict:
     from pickup import _js_raise_ee
 
     _js_raise_ee(sim, z_min=0.14)

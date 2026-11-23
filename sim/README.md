@@ -51,6 +51,10 @@ Kinematic suites (`layout`, `reach`) have no controller. They run once on
 the pseudo-wall `none` whatever `--walls` says, and their rows carry
 `metrics` (IK reach counts, open-gripper gaps) instead of a move verdict.
 
+Suites measure an episode by subscribing to `diag` trace events (`phase` for
+every `log_state` name, `scan_start`/`scan_end`, `look_start`/`look`) and
+reading the world from the callback; the controller only emits.
+
 ## Comparing and baselines
 
 ```

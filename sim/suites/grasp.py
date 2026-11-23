@@ -13,6 +13,7 @@ import os
 import time
 import traceback
 
+import diag
 import runner
 
 BODIES = {"pawn": "pawn_e2", "rook": "rook_h1", "knight": "knight_g1", "bishop": "bishop_c1", "queen": "queen_d1", "king": "king_e1"}
@@ -77,26 +78,26 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
         pickup.seed_vertical(sim, cfg)
         seen: dict[str, dict] = {}
         tilts: list[tuple[str, float]] = []
-        orig = pickup.log_state
 
-        def _log(s, name, extra=None):
+        def _on(kind, s, name, data):
+            if kind != "phase":
+                return
             runner.send_phase(name)
             w = world_of(s)
             tilts.append((name, round(tilt_deg(w.object_pose(body)[1]), 1)))
             if name in ("005_gripper_closed", "006_lift"):
                 seen[name] = _pads_in_piece(w, body) | {"tilt": tilts[-1][1], "squeezing": bool(jaw_squeezing(s))}
-            return orig(s, name, extra)
 
-        pickup.log_state = _log
         geom = dict(PIECES[kind])
         if case["height"] is not None:
             geom["preferred_grasp_height"] = case["height"]
         if case["closed"] is not None:
             geom["gripper_closed"] = case["closed"]
-        r = pickup.execute_move(sim, cfg, scenario={
-            "target_id": body, "source": case["square"], "dest": case["dest"], "yaw_deg": case["yaw"], "geometry": geom,
-            "perception": wall_perception(wall), "quiet": True, "_grasp_attempt": 99,
-        })
+        with diag.subscribe(_on):
+            r = pickup.execute_move(sim, cfg, scenario={
+                "target_id": body, "source": case["square"], "dest": case["dest"], "yaw_deg": case["yaw"], "geometry": geom,
+                "perception": wall_perception(wall), "quiet": True, "_grasp_attempt": 99,
+            })
         wq = world.object_pose(body)
         close, lift = seen.get("005_gripper_closed", {}), seen.get("006_lift", {})
         held = bool(r.get("world_success"))

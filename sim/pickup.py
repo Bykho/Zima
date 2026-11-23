@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "sim"))
 import mujoco
 
 import carry as plumb
+import diag
 import evaluate_move
 
 from ik import (
@@ -189,6 +190,7 @@ def pickup_cfg(cfg: dict) -> dict:
 
 
 def log_state(sim: Sim, name: str, extra: dict | None = None):
+    diag.emit("phase", sim, name, extra=extra)
     sim._pickup_phase = name
     if getattr(sim, "quiet", False):
         return
@@ -2778,6 +2780,13 @@ def _placed(sim, cfg: dict, tid: str, dest: str, dest_xy, surface: float, off_bo
 
 def verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
     """Wrist look at `square`; belief takes the observed XY and upright/lying."""
+    diag.emit("look_start", sim, tid=tid, square=square)
+    out = _verify_piece(sim, cfg, tid, square)
+    diag.emit("look", sim, tid=tid, square=square, out=out)
+    return out
+
+
+def _verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
     surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
     target = square_to_world(square, cfg, z=surface)
     if _reach_observe(sim, cfg, target, tid) is None:

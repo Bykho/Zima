@@ -22,6 +22,7 @@ import os
 import time
 import traceback
 
+import diag
 import runner
 
 VISION_SOURCES = ("d1", "c2", "d4", "a4", "d6", "h4")
@@ -115,14 +116,12 @@ def _run(case: dict, wall: str, xml: str) -> dict:
         from mj import Sim, load_config
         from robot import open_robot
 
-        orig_log = pickup.log_state
 
-        def _log(sim, name, extra=None):
-            phases.append((name, time.time()))
-            runner.send_phase(name)
-            return orig_log(sim, name, extra)
+        def _on(kind, sim, name, data):
+            if kind == "phase":
+                phases.append((name, time.time()))
+                runner.send_phase(name)
 
-        pickup.log_state = _log
         cfg = load_config()
         sc = dict(case["sc"])
         neighbors = sc.pop("neighbors", None) or []
@@ -144,7 +143,8 @@ def _run(case: dict, wall: str, xml: str) -> dict:
         if neighbors:
             tracker = evaluate_move.NeighborTracker(world, [n.get("id", "pawn") for n in neighbors])
             sim.on_step = tracker.step
-        r = episode.run_pickup(sim, cfg, scenario=sc)
+        with diag.subscribe(_on):
+            r = episode.run_pickup(sim, cfg, scenario=sc)
         if lift_only:
             score = evaluate_move.score_lift(world, cfg, before, tid, sc["dest"])
             claimed = bool(r.get("lift_success")) if r.get("stop_after") == "lift" else bool(r.get("success"))
