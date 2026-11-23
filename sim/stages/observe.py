@@ -92,6 +92,16 @@ def confirm(m: Move):
         return Fail("confirm", result["failure_reason"], "place")
 
 
+@register("board_observe", "wrist_scan")
+class WristScan:
+    """Whole-board wrist scan, classified and written into the belief (`perceive.perceive_board`)."""
+
+    def scan(self, sim, cfg: dict) -> dict:
+        from perceive import perceive_board
+
+        return perceive_board(sim, cfg)
+
+
 @register("observe", "wrist_vision")
 class WristVision:
     """Reach an observe pose over the source and estimate the piece XY from the wrist depth image."""

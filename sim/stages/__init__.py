@@ -18,6 +18,7 @@ from stages.types import Fail, Move, Stop
 
 # Pipeline order. observe also confirms the place; retreat also unhooks before observe;
 # recovery runs only when a stage fails (and is gated by `pickup.recover_fallen`).
+# board_observe and unstack_policy are move-level, run by `episode`.
 ORDER = ("observe", "grasp_plan", "approach", "close", "carry", "release", "retreat")
 DEFAULTS = {
     "observe": "wrist_vision",
@@ -28,6 +29,8 @@ DEFAULTS = {
     "release": "open_at_place",
     "retreat": "pad_backoff",
     "recovery": "nest",
+    "board_observe": "wrist_scan",
+    "unstack_policy": "pawns_first",
 }
 
 _REGISTRY: dict[str, dict[str, type]] = {s: {} for s in DEFAULTS}
@@ -74,7 +77,7 @@ def resolve(cfg: dict | None, pipeline: dict | None = None) -> dict[str, object]
     return out
 
 
-MODULES = ("observe", "grasp_plan", "approach", "close", "carry", "release", "retreat", "recovery")
+MODULES = ("observe", "grasp_plan", "approach", "close", "carry", "release", "retreat", "recovery", "unstack")
 
 
 def _load() -> None:

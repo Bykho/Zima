@@ -984,9 +984,7 @@ def _after_place_fail(
     if failed.get("failure_reason") == "RELEASE_FAILURE":
         return None
     if _perceiving(sim) and tid not in sim.known:
-        from perceive import perceive_board
-
-        perceive_board(sim, cfg)
+        stages.resolve(cfg)["board_observe"].scan(sim, cfg)
         if tid not in sim.known:
             failed["failure_reason"] = "PIECE_LOST"
             failed["failure_stage"] = "place"

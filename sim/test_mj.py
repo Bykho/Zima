@@ -151,15 +151,8 @@ def test_wrist_localize():
 
 
 def test_unstack_policy():
-    from sequence import (
-        Move,
-        UnstackFrame,
-        choose_blocker,
-        choose_park,
-        forward_blockers,
-        plan_unstack_move,
-        restore_order,
-    )
+    from sequence import Move, UnstackFrame, forward_blockers, restore_order
+    from stages.unstack import choose_blocker, choose_park, plan_unstack_move
 
     occ = {"g1": "knight_g1", "g2": "pawn_g2", "h2": "pawn_h2"}
     home = choose_blocker("h1", occ, {"h1", "d4"}, {"rook"})

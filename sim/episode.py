@@ -15,12 +15,11 @@ from pickup import (
     yaw_quat,
 )
 from scenario import HIDE_XYZ, PIECE_BODIES, body_kind, piece_scenario
+import stages
 from sequence import (
-    MAX_UNSTACK,
     UnstackFrame,
     occupied_squares,
     piece_kind,
-    plan_next_unstack,
     probe_approach,
 )
 from squares import bowl_xyz, parse_move, square_to_world
@@ -73,6 +72,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
 
     stack: list[UnstackFrame] = []
     unstack_log: list[dict] = []
+    policy = stages.resolve(cfg)["unstack_policy"]
     wrist = {"roll": None, "set": False}
 
     def _plan(square: str, kind: str) -> dict:
@@ -131,7 +131,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
             return True
         in_progress.add(square)
         try:
-            while len(stack) < MAX_UNSTACK and (force or not plan.get("ok")):
+            while len(stack) < policy.max_moves and (force or not plan.get("ok")):
                 skip_sq = {
                     source,
                     dest,
@@ -144,9 +144,9 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
                 }
                 skip_kinds: set[str] = set()
                 prefer = _prefer_square(plan)
-                move = plan_next_unstack(sim, cfg, square, kind, skip_sq, skip_kinds, prefer=prefer)
+                move = policy.next(sim, cfg, square, kind, skip_sq, skip_kinds, prefer=prefer)
                 if move is None and prefer is not None:
-                    move = plan_next_unstack(sim, cfg, square, kind, skip_sq, skip_kinds, prefer=None)
+                    move = policy.next(sim, cfg, square, kind, skip_sq, skip_kinds, prefer=None)
                 if move is None:
                     break
                 sitting = occupied_squares(sim, cfg).get(move.src)
@@ -365,9 +365,7 @@ def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
     """Parse a text move, run it through run_episode on the live board. No chess rules."""
     scan_info = None
     if _perceiving(sim):
-        from perceive import perceive_board
-
-        seen = perceive_board(sim, cfg)
+        seen = stages.resolve(cfg)["board_observe"].scan(sim, cfg)
         scan_info = {"views": seen["views"], "looked": seen["looked"], "pieces": len(seen["pieces"])}
     try:
         src, dst = parse_move(text)
