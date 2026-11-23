@@ -1,5 +1,5 @@
 {
-  "tag": "nudge",
+  "tag": "s14b",
   "suites": [
     "core",
     "grasp",
@@ -17,15 +17,15 @@
   "jobs": 4,
   "only": [],
   "ids": null,
-  "episodes": 862,
+  "episodes": 726,
   "variants": [
     {
       "label": "base",
       "pipeline": ""
     }
   ],
-  "started": "2026-11-23T11:20:03",
-  "commit": "3329806ac43ca1cbb3ca817d63bc0b073e5571a4",
+  "started": "2026-11-23T12:04:59",
+  "commit": "03f49e293c9a26335b30e04573475979626c010a",
   "dirty": false,
   "diff_sha": null,
   "config_sha": "09a20edde715bf2f",
@@ -47,10 +47,10 @@
     "--jobs",
     "4",
     "--tag",
-    "nudge"
+    "s14b"
   ],
-  "finished": "2026-11-23T11:45:49",
-  "wall_clock_s": 1546,
+  "finished": "2026-11-23T12:39:32",
+  "wall_clock_s": 2074,
   "baseline": "neighbors_cheat",
-  "from_run": "nudge2"
+  "from_run": "s14c"
 }
