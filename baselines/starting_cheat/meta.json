@@ -1,20 +1,34 @@
 {
-  "tag": "rb_start",
+  "tag": "nudge",
   "suites": [
-    "starting"
+    "core",
+    "grasp",
+    "matrix",
+    "starting",
+    "neighbors",
+    "offsets",
+    "perception_error",
+    "transport"
   ],
   "walls": [
-    "cheat"
+    "cheat",
+    "real"
   ],
   "jobs": 4,
   "only": [],
   "ids": null,
-  "episodes": 64,
-  "started": "2026-11-23T08:46:34",
-  "commit": "949bee65494a7b9cb319dea6abc7eb9dc54e1a0d",
+  "episodes": 862,
+  "variants": [
+    {
+      "label": "base",
+      "pipeline": ""
+    }
+  ],
+  "started": "2026-11-23T11:20:03",
+  "commit": "3329806ac43ca1cbb3ca817d63bc0b073e5571a4",
   "dirty": false,
   "diff_sha": null,
-  "config_sha": "3138c86592fe6fe0",
+  "config_sha": "09a20edde715bf2f",
   "host": "cursor",
   "platform": "Linux-6.12.113+-x86_64-with-glibc2.39",
   "machine": "x86_64",
@@ -27,16 +41,16 @@
   "argv": [
     "sim/run.py",
     "--suite",
-    "starting",
+    "core,grasp,matrix,starting,neighbors,offsets,perception_error,transport",
     "--walls",
-    "cheat",
+    "cheat,real",
     "--jobs",
     "4",
     "--tag",
-    "rb_start"
+    "nudge"
   ],
-  "finished": "2026-11-23T08:48:29",
-  "wall_clock_s": 114,
+  "finished": "2026-11-23T11:45:49",
+  "wall_clock_s": 1546,
   "baseline": "starting_cheat",
-  "from_run": "rb_start"
+  "from_run": "nudge2"
 }
