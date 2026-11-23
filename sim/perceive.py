@@ -24,12 +24,16 @@ UPRIGHT_FRAC = 0.7
 LOST_COST_M = 0.1  # a forgotten body's last-seen spot ranks behind any current belief
 
 
-def _white_body(name: str) -> bool | None:
-    """Colour from a `{kind}_{square}` body's home rank; None for bare-name scenes (colour unknown)."""
+def _home_square(name: str) -> str | None:
+    """Home square of a `{kind}_{square}` body; None in bare-name scenes."""
     parts = name.split("_")
-    if len(parts) < 2 or len(parts[1]) < 2:
-        return None
-    return parts[1][1] in "12"
+    return parts[1] if len(parts) >= 2 and len(parts[1]) == 2 else None
+
+
+def _white_body(name: str) -> bool | None:
+    """Colour from the body's home rank; None when unknown."""
+    home = _home_square(name)
+    return None if home is None else home[1] in "12"
 
 
 def _colour_fits(name: str, white: bool | None) -> bool:
@@ -113,7 +117,7 @@ def associate(sim, cfg: dict, pieces: list[dict]) -> dict[str, str]:
             elif b in lost:
                 cost = LOST_COST_M + float(np.linalg.norm(lost[b] - xy))
             else:
-                cost = 1.0 + (0.0 if b.split("_")[1] == p["square"] else 0.5)
+                cost = 1.0 + (0.0 if _home_square(b) == p["square"] else 0.5)
             claims.append((cost, i, b))
     claims.sort()
     body_of: dict[int, str] = {}
