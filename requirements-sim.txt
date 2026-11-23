@@ -1,4 +1,4 @@
-mujoco
+mujoco==4.0.1  # canonical baselines (baselines/*/meta.json) were recorded with this version
 pybullet
 pyyaml
 opencv-python

@@ -1,35 +1,49 @@
 {
-  "tag": "step3_core",
+  "tag": "a1_linux",
   "suites": [
-    "core"
+    "core",
+    "grasp",
+    "matrix",
+    "offsets",
+    "perception_error",
+    "neighbors",
+    "transport"
   ],
   "walls": [
     "real",
     "cheat"
   ],
-  "jobs": 2,
+  "jobs": 4,
   "only": [],
-  "episodes": 104,
-  "started": "2026-11-22T15:22:07",
-  "commit": "780b1ec747f8b1a2ed08cc57ce124f177981b8c3",
+  "ids": null,
+  "episodes": 734,
+  "started": "2026-11-23T06:34:18",
+  "commit": "69ba560d6b132940761c2ea211c16cb8f139dab0",
   "dirty": false,
   "diff_sha": null,
   "config_sha": "3138c86592fe6fe0",
-  "host": "MacBookPro.localdomain",
-  "python": "3.13.1",
+  "host": "cursor",
+  "platform": "Linux-6.12.113+-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "python": "3.12.3",
+  "mujoco": "4.0.1",
+  "numpy": "2.5.5",
+  "variant": "base",
   "worker_mem_cap_gb": 3.0,
-  "total_mem_cap_gb": 8.0,
+  "total_mem_cap_gb": 12.0,
   "argv": [
     "sim/run.py",
     "--suite",
-    "core",
+    "core,grasp,matrix,offsets,perception_error,neighbors,transport",
     "--walls",
     "real,cheat",
+    "--jobs",
+    "4",
     "--tag",
-    "step3_core"
+    "a1_linux"
   ],
-  "finished": "2026-11-22T15:30:35",
-  "wall_clock_s": 508,
+  "finished": "2026-11-23T06:46:22",
+  "wall_clock_s": 724,
   "baseline": "core_real",
-  "from_run": "step3_core"
+  "from_run": "a1_linux"
 }

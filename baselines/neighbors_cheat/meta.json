@@ -1,40 +1,45 @@
 {
-  "tag": "ev_6c",
+  "tag": "a1_linux_lift",
   "suites": [
     "offsets",
     "perception_error",
-    "robustness",
-    "neighbors",
-    "transport"
+    "neighbors"
   ],
   "walls": [
-    "cheat",
-    "real"
+    "real",
+    "cheat"
   ],
-  "jobs": 2,
+  "jobs": 4,
   "only": [],
   "ids": null,
-  "episodes": 912,
-  "started": "2026-11-22T17:57:48",
-  "commit": "6c12cf7f15cad8924d6d9fb12c057cf6d43fa955",
-  "dirty": true,
-  "diff_sha": "f37da813adbb8c69",
+  "episodes": 250,
+  "started": "2026-11-23T07:01:10",
+  "commit": "43ae006d071df2c504d8a67beddf78f55882e42f",
+  "dirty": false,
+  "diff_sha": null,
   "config_sha": "3138c86592fe6fe0",
-  "host": "MacBookPro.lan",
-  "python": "3.13.1",
+  "host": "cursor",
+  "platform": "Linux-6.12.113+-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "python": "3.12.3",
+  "mujoco": "4.0.1",
+  "numpy": "2.5.5",
+  "variant": "base",
   "worker_mem_cap_gb": 3.0,
-  "total_mem_cap_gb": 8.0,
+  "total_mem_cap_gb": 12.0,
   "argv": [
     "sim/run.py",
     "--suite",
-    "offsets,perception_error,robustness,neighbors,transport",
+    "offsets,perception_error,neighbors",
     "--walls",
-    "cheat,real",
+    "real,cheat",
+    "--jobs",
+    "4",
     "--tag",
-    "ev_6c"
+    "a1_linux_lift"
   ],
-  "finished": "2026-11-22T18:02:48",
-  "wall_clock_s": 300,
+  "finished": "2026-11-23T07:02:30",
+  "wall_clock_s": 80,
   "baseline": "neighbors_cheat",
-  "from_run": "ev_6c"
+  "from_run": "a1_linux_lift"
 }
