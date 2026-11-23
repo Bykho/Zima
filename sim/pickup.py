@@ -1047,6 +1047,23 @@ def bystander_contact(sim: Sim, bodies: list[str]) -> dict | None:
     }
 
 
+_BEARING_NZ = 0.7  # contact normal within ~45 deg of vertical
+
+
+def _hand_bears_on(sim: Sim, tid: str) -> bool:
+    """A robot link presses on the piece from above or below (a lip or crown
+    caught on a jaw). Sliding the hand out then drags the piece by friction."""
+    w = world_of(sim) if getattr(sim, "cheat_state", True) else sim
+    b1, b2 = w.contact_bodies()
+    if b1.size == 0:
+        return False
+    robot = _robot_bid_array(sim)
+    me = sim.body_id(tid)
+    hit = (np.isin(b1, robot) & (b2 == me)) | (np.isin(b2, robot) & (b1 == me))
+    nz = np.abs(w.data.contact.frame[: b1.size, 2])
+    return bool((hit & (nz > _BEARING_NZ)).any())
+
+
 def jaw_contacts(sim: Sim, object_id: str | None = None) -> list[dict]:
     tid = object_id or _tid(sim)
     return [
@@ -1408,6 +1425,88 @@ def _hand_clear_of(sim: Sim, tid: str, margin: float = _RETREAT_GAP_M) -> bool:
     if grasp_acquired(sim, tid) or bystander_contact(sim, [tid]):
         return False
     return float(neighbor_approach_gap(sim, [tid])) >= float(margin)
+
+
+_CENTRE_SAMPLES = 8
+
+
+@probing
+def _roomiest_along(sim: Sim, tid: str, start, shift, v_local) -> tuple[np.ndarray | None, float]:
+    """EE point on start -> start + shift where the open hand stands farthest
+    from the piece, and that gap. The pad midpoint is only the centre at pad
+    height; the hinged moving jaw leans in above it. Restores qpos."""
+    snap = sim.qpos()
+    best, room = None, -1.0
+    try:
+        for k in range(_CENTRE_SAMPLES + 1):
+            p = start + shift * (k / _CENTRE_SAMPLES)
+            if not plumb.solve_plumb(sim, p, v_local, plumb.LIFT_TILT_DEG):
+                continue
+            g = float(neighbor_approach_gap(sim, [tid]))
+            if g > room + 1e-4:
+                best, room = p, g
+        return best, room
+    finally:
+        sim.set_qpos({n: snap[n] for n in ARM_JOINTS}, hold=True)
+
+
+# A piece left leaning on the fixed jaw rocks back upright if the jaw leaves
+# slowly; a quick slide drags it past its tipping angle.
+_RELEASE_SLIDE_MPS = 0.02
+
+
+@probing
+def _plan_slide_rise(sim: Sim, centre, top, v_local, avoid: list[str]) -> tuple[list | None, list | None]:
+    snap = sim.qpos()
+    try:
+        slide = plumb.plan(sim, [(centre, plumb.LIFT_TILT_DEG)], v_local, avoid, gap=0.002)
+        if slide is None:
+            return None, None
+        sim.set_qpos(slide[-1], hold=True)
+        return slide, plumb.plan(sim, [(top, plumb.LIFT_TILT_DEG)], v_local, avoid, gap=0.002)
+    finally:
+        sim.set_qpos({n: snap[n] for n in ARM_JOINTS}, hold=True)
+
+
+def _centred_retreat(sim: Sim, tid: str, avoid: list[str], z_up: float, jaw_clear_m: float) -> dict:
+    """After release: slide the open hand along the pinch axis to where it
+    stands farthest from the piece, then rise holding the hand's orientation
+    until the jaws clear the piece top, then up to z_up leaning freely.
+
+    Only the moving jaw opens, so the piece is left against the fixed pad.
+    Rising from there drags it; a rise that re-pitches the hand swings a jaw
+    into it. The room is measured on the robot's own model at the pose it set
+    the piece down, and the rise is refused if it closes on the piece.
+    """
+    fixed, moving = plumb._pad_xyz(sim, plumb.PAD_GEOMS[0]), plumb._pad_xyz(sim, plumb.PAD_GEOMS[1])
+    u = moving - fixed
+    u[2] = 0.0
+    if float(np.linalg.norm(u)) < 1e-6:
+        return {"ok": False, "why": "pads"}
+    u /= float(np.linalg.norm(u))
+    q, _ = sim.object_pose(tid)
+    mid = 0.5 * (fixed + moving)
+    shift = float((np.asarray(q, dtype=float) - mid) @ u) * u
+    gpos, R = sim.site_pose(EE_SITE)
+    v_local = np.asarray(R, dtype=float).reshape(3, 3).T @ plumb.UP
+    centre, room = _roomiest_along(sim, tid, np.asarray(gpos, dtype=float), shift, v_local)
+    if centre is None:
+        return {"ok": False, "why": "ik"}
+    z_clear = float(gpos[2]) + jaw_clear_m
+    top = [centre[0], centre[1], max(float(centre[2]), z_clear)]
+    out = {"shift_mm": round(float(np.linalg.norm(centre - np.asarray(gpos))) * 1000, 1), "room_mm": round(room * 1000, 1)}
+    slide, rise = _plan_slide_rise(sim, centre, top, v_local, [*avoid, tid])
+    if rise is None:
+        return {**out, "ok": False, "why": getattr(sim, "plumb_fail", None)}
+    plumb.follow(sim, slide, _RELEASE_SLIDE_MPS)
+    plumb.follow(sim, rise, plumb.PLUMB_LOWER_SPEED_MPS)
+    out["ok"] = True
+    high = top[2] >= z_up or None
+    if not high:
+        rest = plumb.plan(sim, [([centre[0], centre[1], float(z_up)], plumb.AIRBORNE_TILT_DEG)], v_local, avoid, gap=0.002)
+        high = rest is not None and plumb.follow(sim, rest, plumb.PLUMB_SPEED_MPS)
+    out["high"] = bool(high)
+    return out
 
 
 def _clear_then_rise(sim: Sim, cfg: dict, tid: str, z_min: float = 0.11) -> dict:
@@ -3733,10 +3832,19 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     if not off_board:
         spec = PIECES.get(body_kind(tid) or tid) or {}
         jaw_clear = float(spec.get("height", 0.055)) - float(spec.get("preferred_grasp_height", 0.01)) + 0.01
-        straight_up = plumb.retreat(
-            sim, [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"], z_up, jaw_clear,
-            touching=lambda: bystander_contact(sim, [tid]),
-        )
+        avoid = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
+        bearing = _hand_bears_on(sim, tid)
+        result["place_diag"]["hand_bears_on_piece"] = bearing
+        centred = {"ok": False, "why": "bearing"} if bearing else _centred_retreat(sim, tid, avoid, z_up, jaw_clear)
+        result["place_diag"]["retreat_centred"] = centred
+        if centred["ok"]:
+            straight_up = []
+            if not centred["high"]:
+                g_top, _ = sim.site_pose(EE_SITE)
+                _safe_lin(sim, [float(g_top[0]), float(g_top[1]), z_up], cfg, wrist,
+                          obstacles=obstacle_bodies(sim, skip={tid}), skip={tid})
+        else:
+            straight_up = plumb.retreat(sim, avoid, z_up, jaw_clear, touching=lambda: bystander_contact(sim, [tid]))
         result["place_diag"]["retreat_straight"] = straight_up is not None or getattr(sim, "plumb_fail", None)
     if straight_up is not None:
         retreated = True

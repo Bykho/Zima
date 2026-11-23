@@ -1,13 +1,7 @@
 {
-  "tag": "a1_linux",
+  "tag": "retreat4",
   "suites": [
-    "core",
-    "grasp",
-    "matrix",
-    "offsets",
-    "perception_error",
-    "neighbors",
-    "transport"
+    "core"
   ],
   "walls": [
     "real",
@@ -16,11 +10,11 @@
   "jobs": 4,
   "only": [],
   "ids": null,
-  "episodes": 734,
-  "started": "2026-11-23T06:34:18",
-  "commit": "69ba560d6b132940761c2ea211c16cb8f139dab0",
-  "dirty": false,
-  "diff_sha": null,
+  "episodes": 104,
+  "started": "2026-11-23T07:44:25",
+  "commit": "482852515e4a061103c1a7413a90ce559c0b0846",
+  "dirty": true,
+  "diff_sha": "a14c76e8de6e7ea7",
   "config_sha": "3138c86592fe6fe0",
   "host": "cursor",
   "platform": "Linux-6.12.113+-x86_64-with-glibc2.39",
@@ -34,16 +28,16 @@
   "argv": [
     "sim/run.py",
     "--suite",
-    "core,grasp,matrix,offsets,perception_error,neighbors,transport",
+    "core",
     "--walls",
     "real,cheat",
     "--jobs",
     "4",
     "--tag",
-    "a1_linux"
+    "retreat4"
   ],
-  "finished": "2026-11-23T06:46:22",
-  "wall_clock_s": 724,
+  "finished": "2026-11-23T07:50:17",
+  "wall_clock_s": 352,
   "baseline": "core_cheat",
-  "from_run": "a1_linux"
+  "from_run": "retreat4"
 }
