@@ -26,24 +26,33 @@ from sequence import (
 from squares import bowl_xyz, parse_move, square_to_world
 
 
-def _setup_board(sim, cfg: dict, sc: dict, tid: str, source: str, spawn, yaw_deg: float) -> None:
-    """Park unused free bodies off the table and place the target.
+def setup_board(world, cfg: dict, sc: dict, spawn_xy=None) -> None:
+    """Scene setup before `open_robot`: park unused free bodies off the table and place the target.
 
     A 32-piece board already has every man on its square — leave it alone.
     On a populated board, pieces sitting on other squares stay put.
     """
-    if sim.body_model_pos("pawn_e2") is not None:
+    if world.body_model_pos("pawn_e2") is not None:
         return
+    tid = sc.get("target_id", "queen")
+    source = sc.get("source", pickup_cfg(cfg).get("source", "d1"))
+    if spawn_xy is not None:
+        spawn = list(spawn_xy)
+    else:
+        surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+        base = square_to_world(source, cfg, z=surface)
+        off = [float(v) for v in sc.get("offset_xy", [0.0, 0.0])]
+        spawn = [base[0] + off[0], base[1] + off[1], base[2]]
     populated = bool(sc.get("populated"))
-    occ = occupied_squares(sim, cfg)
+    occ = occupied_squares(world, cfg)
     for name in PIECE_BODIES:
         if name == tid:
             continue
         sitting = [sq for sq, body in occ.items() if body == name]
         if populated and sitting and source not in sitting:
             continue
-        sim.place_object(name, HIDE_XYZ)
-    sim.place_object(tid, spawn, yaw_quat(yaw_deg))
+        world.place_object(name, HIDE_XYZ)
+    world.place_object(tid, spawn, yaw_quat(float(sc.get("yaw_deg", 0.0))))
 
 
 def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:
@@ -58,20 +67,9 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
     dest = sc.get("dest", p.get("dest", "d4"))
     surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
     open_g = float(p.get("gripper_open", 0.45))
-    yaw_deg = float(sc.get("yaw_deg", 0.0))
-    offset_xy = [float(v) for v in sc.get("offset_xy", [0.0, 0.0])]
     want_lift = sc.get("stop_after") == "lift"
     populated = bool(sc.get("populated"))
     reset_board = bool(sc.get("reset_board", True))
-
-    if spawn_xy is not None:
-        spawn = list(spawn_xy)
-    else:
-        base = square_to_world(source, cfg, z=surface)
-        spawn = [base[0] + offset_xy[0], base[1] + offset_xy[1], base[2]]
-
-    if reset_board:
-        _setup_board(sim, cfg, sc, tid, source, spawn, yaw_deg)
 
     stack: list[UnstackFrame] = []
     unstack_log: list[dict] = []
@@ -118,7 +116,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
             quiet=True,
             reset_board=False,
             stop_after=extra.get("stop_after"),
-            place_target=extra.get("place_target", False),
             target_id=body,
         )
         try:
@@ -197,7 +194,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
     target_sc = dict(sc)
     target_sc["reset_board"] = False
     target_sc["seed_home"] = False
-    target_sc["place_target"] = False
     if want_lift and stack:
         target_sc["stop_after"] = None
     result = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=spawn_xy, scenario=target_sc)
@@ -299,7 +295,6 @@ def discard_square(
         reset_board=False,
         quiet=True,
         place_xyz=bowl_xyz(cfg),
-        place_target=False,
         target_id=body,
         keep_squares=sorted(keep_squares or ()),
         defer_restack=defer_restack,
@@ -319,9 +314,6 @@ def discard_square(
         result["piece"] = kind
         result["failure_stage"] = result.get("failure_stage") or "capture"
         return result
-    # A bare-name body is the scene's only one of its kind; free it for the next move of that kind.
-    if body in PIECE_BODIES:
-        sim.place_object(body, HIDE_XYZ)
     result["source"] = square
     result["dest"] = "bowl"
     result["piece"] = kind
@@ -352,7 +344,6 @@ def restack_parked(sim, cfg: dict, frames: list[dict]) -> dict:
             name=f"restack_{kind}_{frame['park']}_{frame['home']}",
             quiet=True,
             reset_board=False,
-            place_target=False,
             seed_home=False,
             target_id=body,
         )

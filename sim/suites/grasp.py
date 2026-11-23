@@ -54,12 +54,14 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
     t0 = time.time()
     try:
         import episode
+        import evaluate_move
         import pickup
         from evaluate_move import tilt_deg
         from mj import Sim, load_config
-        from robot import jaw_squeezing, open_robot, world_of
+        from robot import jaw_squeezing, open_robot, wall_perception, world_of
         from scenario import PIECES
         from sequence import occupied_squares
+        from squares import square_to_world
         from suites.chess_moves import _pads_in_piece
 
         cfg = load_config()
@@ -68,6 +70,8 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
         for k, name in enumerate(occupied_squares(world, cfg).values()):
             if name != body:
                 world.place_object(name, [3.0 + 0.1 * k, 3.0, 0.02])
+        surface = float(cfg["sim"]["board"]["surface_z"])
+        world.place_object(body, square_to_world(case["square"], cfg, z=surface), pickup.yaw_quat(case["yaw"]))
         sim = open_robot(world, wall)
         sim.quiet = True
         pickup.seed_vertical(sim, cfg)
@@ -91,13 +95,16 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
             geom["gripper_closed"] = case["closed"]
         r = pickup.execute_move(sim, cfg, scenario={
             "target_id": body, "source": case["square"], "dest": case["dest"], "yaw_deg": case["yaw"], "geometry": geom,
-            "quiet": True, "_grasp_attempt": 99,
+            "perception": wall_perception(wall), "quiet": True, "_grasp_attempt": 99,
         })
         wq = world.object_pose(body)
         close, lift = seen.get("005_gripper_closed", {}), seen.get("006_lift", {})
         held = bool(r.get("world_success"))
+        place = evaluate_move.placement(world, cfg, body, case["dest"])
         row.update(
             ok=held,
+            ok_loose=bool(place["ok_loose"] and not r.get("collateral")),
+            mover_final={k: place[k] for k in ("off_dest_mm", "z_mm", "tilt", "at_rest", "robot_contact")},
             claimed=bool(r.get("success")),
             reason=r.get("failure_reason"),
             stage=None if held else (r.get("failure_stage") or episode._failure_stage(r)),

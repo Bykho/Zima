@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -31,6 +32,7 @@ def parser(default_walls: str = "cheat,real") -> argparse.ArgumentParser:
     ap.add_argument("--only", default="", help="comma-separated substrings; keep cases whose id contains any")
     ap.add_argument("--tag", default="latest")
     ap.add_argument("--list", action="store_true", help="print suites and walls, then exit")
+    ap.add_argument("--realism", action="store_true", help="rough physics + noisy depth (sim/realism.py); rows get variant 'realism'")
     return ap
 
 
@@ -58,6 +60,8 @@ def main(argv: list[str] | None = None, default_walls: str = "cheat,real", mirro
         raise SystemExit(f"unknown suite/wall: {', '.join(bad)} (see --list)")
     n = sum(len(runner.select_cases(s, _csv(args.only))) for s in suites)
     print(f"{n} cases x {len(walls)} walls = {n * len(walls)} episodes on {args.jobs} workers")
+    if args.realism:
+        os.environ["ZIMA_REALISM"] = "1"
     rows, run_dir = runner.run(suites, walls, jobs=args.jobs, timeout=args.timeout, only=_csv(args.only),
                                tag=args.tag, on_row=runner.print_row)
     report = (run_dir / "summary.txt").read_text()

@@ -1568,7 +1568,6 @@ def _retry_missed_grasp(
         extra={"attempt": attempt + 2, "after": failed.get("failure_reason")},
     )
     nxt = dict(sc)
-    nxt["place_target"] = False
     nxt["seed_home"] = False
     nxt["reset_board"] = False
     nxt["_grasp_attempt"] = attempt + 1
@@ -2249,7 +2248,6 @@ def _recover_fallen_then_finish(
         failed["failure_reason"] = rec.get("reason") or "RECOVER_FAIL"
         return None
     nxt = dict(sc)
-    nxt["place_target"] = False
     nxt["seed_home"] = True
     nxt["reset_board"] = False
     nxt["_from_nest"] = True
@@ -2298,7 +2296,6 @@ def _after_pick_fail(
         and (sc.get("place_xyz") is not None or not on_dest)
     ):
         nxt = dict(sc)
-        nxt["place_target"] = False
         nxt["seed_home"] = True
         nxt["reset_board"] = False
         nxt["_from_nest"] = False
@@ -2992,7 +2989,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         if off_board:
             world_ok = bowl_contains(wp, dest_xy)
         else:
-            world_ok = square_of_body(W, cfg, tid) == dest and queen_upright(wq, tilt_max=0.5)
+            world_ok = evaluate_move.placement(W, cfg, tid, dest)["ok"]
         result["world_success"] = bool(world_ok and not result["collateral"])
         annotate_episode(result)
         return result
@@ -3003,8 +3000,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         base = square_to_world(source, cfg, z=surface)
         spawn = [base[0] + offset_xy[0], base[1] + offset_xy[1], base[2]]
     result["spawn_xyz"] = _xyz(spawn)
-    if sc.get("place_target", True):
-        sim.place_object(tid, spawn, yaw_quat(yaw_deg))
     if sc.get("seed_home", sc.get("reset_board", True)):
         seed_vertical(sim, cfg)
     gpos, _ = sim.site_pose(EE_SITE)
@@ -3787,13 +3782,15 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--vision", action="store_true", help="use wrist RGB-D instead of ground-truth pose")
+    parser.add_argument("--vision", action="store_true", help="wrist RGB-D pose (the default; kept for old commands)")
+    parser.add_argument("--gt", action="store_true", help="belief pose instead of a wrist look (truth only under --wall cheat/off)")
     parser.add_argument("--full-board", action="store_true", help="load starting-position chess_scene_full.xml")
     parser.add_argument("--random", action="store_true", help="spawn queen at a random on-board XY, not a square")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--video", action="store_true", help="write overview+side mp4 under sim/debug/pickup/")
-    parser.add_argument("--wall", choices=WALLS, default="off", help="controller/world separation (robot.py)")
+    parser.add_argument("--wall", choices=WALLS, default="real", help="controller/world separation (robot.py)")
     args = parser.parse_args()
+    args.vision = not args.gt
     cfg = load_config()
     spawn_xy = None
     if args.random:
@@ -3806,7 +3803,11 @@ def main():
         from scenario import full_board_scenario
 
         sc = full_board_scenario(perception="vision" if args.vision else "gt")
-    sim = open_robot(Sim(xml_path=xml, cfg=cfg), args.wall)
+    from episode import run_pickup, setup_board
+
+    world = Sim(xml_path=xml, cfg=cfg)
+    setup_board(world, cfg, sc or {}, spawn_xy=spawn_xy)
+    sim = open_robot(world, args.wall)
     rec = None
     if args.video:
         tag = "vision" if args.vision else "gt"
@@ -3815,8 +3816,6 @@ def main():
         rec = VideoRecorder(sim, DEBUG_DIR / "pickup" / f"{tag}.mp4")
         sim.on_step = rec.grab
     try:
-        from episode import run_pickup
-
         result = run_pickup(sim, cfg, use_vision=args.vision, spawn_xy=spawn_xy, scenario=sc)
         if rec is not None:
             rec.save()

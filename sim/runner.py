@@ -147,11 +147,12 @@ def summarize(rows: list[dict]) -> str:
     for key in keys:
         rs = [r for r in rows if group_key(r) == key]
         ok = sum(r["ok"] for r in rs)
+        loose = sum(bool(r.get("ok_loose")) for r in rs)
         claimed = sum(r.get("claimed", False) for r in rs)
         lying = sum(1 for r in rs if r.get("claimed") and not r["ok"])
         ts = [r["t"] for r in rs]
         lines.append(
-            f"\n[{group_label(key, keys)}] ok {ok}/{len(rs)} ({100 * ok / max(1, len(rs)):.0f}%)   claimed {claimed}   "
+            f"\n[{group_label(key, keys)}] ok {ok}/{len(rs)} ({100 * ok / max(1, len(rs)):.0f}%)   ok_loose {loose}   claimed {claimed}   "
             f"claimed-but-wrong {lying}   time median {median(ts):.1f}s  max {max(ts):.1f}s  total {sum(ts):.0f}s"
         )
         caps = [r for r in rs if r.get("capture")]
@@ -183,8 +184,17 @@ def _git(*args: str) -> str:
         return ""
 
 
+def _version(mod: str) -> str | None:
+    try:
+        return __import__(mod).__version__
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def run_meta() -> dict:
     """What the rows were produced from, so a later compare can tell code, config and run changes apart."""
+    import realism
+
     diff = _git("diff", "HEAD", "--", "sim", "config.yaml", "assets")
     cfg = ROOT / "config.yaml"
     return {
@@ -193,7 +203,12 @@ def run_meta() -> dict:
         "diff_sha": _sha(diff.encode()) if diff.strip() else None,
         "config_sha": _sha(cfg.read_bytes()) if cfg.exists() else None,
         "host": platform.node(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
         "python": platform.python_version(),
+        "mujoco": _version("mujoco"),
+        "numpy": _version("numpy"),
+        "variant": realism.variant(),
         "worker_mem_cap_gb": WORKER_MEM_CAP_GB,
         "total_mem_cap_gb": TOTAL_MEM_CAP_GB,
         "argv": sys.argv,
@@ -204,15 +219,19 @@ def _run_item(args: tuple) -> dict:
     suite, case, wall, timeout = args
     from suites import SUITES
 
+    import realism
+
     row = SUITES[suite].run(case, wall, timeout)
-    return {"suite": suite, **row}
+    return {"suite": suite, "variant": realism.variant(), **row}
 
 
 def _fail_item(args: tuple, reason: str, stage: str, t: float) -> dict:
     suite, case, wall, timeout = args
     from suites import SUITES
 
-    return {"suite": suite, **SUITES[suite].fail_row(case, wall, reason, stage, t)}
+    import realism
+
+    return {"suite": suite, "variant": realism.variant(), **SUITES[suite].fail_row(case, wall, reason, stage, t)}
 
 
 def select_cases(suite: str, only: list[str], ids: list[str] | None = None) -> list[dict]:

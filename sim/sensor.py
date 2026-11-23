@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from realism import noisy_depth
 from rgbd import K_from_fovy, RgbdObservation
 
 # Published D405 working range. Perception reads these from the observation.
@@ -63,7 +64,7 @@ def capture(sim, width: int | None = None, height: int | None = None, camera: st
     R, t = _mujoco_cv_extrinsics(sim, camera)
     return RgbdObservation(
         rgb=sim.render(camera, w, h),
-        depth=sim.render_depth(camera, w, h),
+        depth=noisy_depth(sim.render_depth(camera, w, h)),
         K=K_from_fovy(w, h, fovy),
         R=R,
         t=t,

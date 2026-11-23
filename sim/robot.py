@@ -36,6 +36,10 @@ class GroundTruthAccess(RuntimeError):
     """Control code asked for something only the simulator knows."""
 
 
+class WorldWrite(RuntimeError):
+    """Control code tried to edit the world; the robot moves things only through its servos."""
+
+
 def world_of(sim) -> Sim:
     """Physics world behind a Robot. Evaluator privilege, never control."""
     return getattr(sim, "_world", None) or sim
@@ -61,14 +65,23 @@ def open_robot(world: Sim, wall: str = "cheat"):
     cheat       Robot with perfect state, actuated motion
     perception  same as real since the teleporting motion was removed (wall kept for old commands)
     real        state from perception only, actuated motion only
+
+    Opening the robot starts the episode: the world's scene is locked, so from
+    here on only physics moves its bodies.
     """
+    if wall not in WALLS:
+        raise ValueError(f"wall must be one of {WALLS}")
+    world.lock_scene()
     if wall == "off":
         return world
     if wall == "cheat":
         return Robot(world, cheat_state=True)
-    if wall in ("perception", "real"):
-        return Robot(world, cheat_state=False)
-    raise ValueError(f"wall must be one of {WALLS}")
+    return Robot(world, cheat_state=False)
+
+
+def wall_perception(wall: str) -> str:
+    """Pose source for a move on `wall`: belief ("gt") is truth only where the wall gives truth; elsewhere look."""
+    return "gt" if wall in ("off", "cheat") else "vision"
 
 
 def jaw_squeezing(sim) -> bool:
@@ -267,41 +280,37 @@ class Robot(Sim):
         self.data.qpos[adr : adr + 3] = pe + Re @ p_off
         self.data.qpos[adr + 3 : adr + 7] = q
 
-    # -- scene edits act on the world; belief learns them only by cheating -
+    # -- the controller never edits the world ----------------------------
+
+    def _refuse(self, what: str):
+        raise WorldWrite(f"{what}: the controller cannot edit the world; set the scene up before open_robot")
 
     def place_object(self, body: str, xyz, quat=(1.0, 0.0, 0.0, 0.0)):
         if getattr(self, "_world", None) is None:
             return super().place_object(body, xyz, quat)
-        ok = self._world.place_object(body, xyz, quat)
-        if self.cheat_state:
-            self._sync()
-        return ok
+        self._refuse("place_object")
 
     def hide_body(self, name: str, z: float = -1.0) -> bool:
-        ok = self._world.hide_body(name, z)
-        super().hide_body(name, z)
-        return ok
+        self._refuse("hide_body")
 
     def set_body_pos(self, name: str, xyz) -> bool:
-        ok = self._world.set_body_pos(name, xyz)
-        super().set_body_pos(name, xyz)
-        return ok
+        self._refuse("set_body_pos")
 
     def apply_arm_base(self, pos=None) -> None:
-        super().apply_arm_base(pos)
-        world = getattr(self, "_world", None)
-        if world is not None:
-            world.apply_arm_base(pos)
-            self._sync()
+        if getattr(self, "_world", None) is None:
+            return super().apply_arm_base(pos)
+        self._refuse("apply_arm_base")
 
     def reset(self):
-        self._world.reset()
-        super().reset()
+        self._refuse("reset")
+
+    def forget_all(self) -> None:
+        """Drop every belief (after an operator rewound the world): the robot must look again."""
+        self.detach()
         if not self.cheat_state:
             self._hide_all()
             self.known.clear()
             self.last_seen.clear()
-            self.detach()
         self._sync()
 
     def close(self):

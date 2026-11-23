@@ -40,7 +40,7 @@ def _grasp() -> Suite:
     from suites import grasp
 
     return Suite(cases=grasp.suite_cases, run=grasp.run_case, fail_row=grasp.fail_row,
-                 about="every kind x 12 yaws, one piece alone, d4 -> d6", record_walls=(),
+                 about="every kind x 12 yaws, one piece alone, d4 -> d6 (camera pose on walls without truth)",
                  quick=("pawn_y000", "pawn_y030", "knight_y000", "knight_y210", "queen_y090", "king_y330"))
 
 

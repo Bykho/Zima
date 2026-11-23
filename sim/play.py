@@ -100,23 +100,29 @@ def _fail_detail(result: dict) -> str | None:
 
 
 def _snapshot(sim: Sim) -> dict:
+    """Physics state of the world behind the controller (operator undo, not a robot input)."""
+    world = world_of(sim)
     return {
-        "body_pos": np.array(sim.model.body_pos),
-        "qpos": sim.data.qpos.copy(),
-        "qvel": sim.data.qvel.copy(),
-        "ctrl": sim.data.ctrl.copy(),
+        "body_pos": np.array(world.model.body_pos),
+        "qpos": world.data.qpos.copy(),
+        "qvel": world.data.qvel.copy(),
+        "ctrl": world.data.ctrl.copy(),
     }
 
 
 def _restore(sim: Sim, cfg: dict, snap: dict) -> None:
-    sim.model.body_pos[:] = snap["body_pos"]
-    mujoco.mj_resetData(sim.model, sim.data)
-    sim.data.qpos[:] = snap["qpos"]
-    sim.data.qvel[:] = snap["qvel"]
-    sim.data.ctrl[:] = snap["ctrl"]
-    sim.model.body_pos[:] = snap["body_pos"]
-    mujoco.mj_forward(sim.model, sim.data)
-    sim.mark_scene_reset()
+    """Rewind the world to `snap`; the robot forgets what it saw and homes physically."""
+    world = world_of(sim)
+    with world.scene_setup():
+        world.model.body_pos[:] = snap["body_pos"]
+        mujoco.mj_resetData(world.model, world.data)
+        world.data.qpos[:] = snap["qpos"]
+        world.data.qvel[:] = snap["qvel"]
+        world.data.ctrl[:] = snap["ctrl"]
+        mujoco.mj_forward(world.model, world.data)
+    if sim is not world:
+        sim.data.ctrl[:] = snap["ctrl"]
+        sim.forget_all()
     seed_vertical(sim, cfg)
 
 
@@ -205,7 +211,7 @@ def main() -> int:
     parser.add_argument("--view", action="store_true", help="open MuJoCo viewer (default in interactive mode)")
     parser.add_argument("--headless", action="store_true", help="no viewer")
     parser.add_argument("--speed", type=float, default=None, help="video clock (2 = 2x dt). omit for real-time")
-    parser.add_argument("--wall", choices=WALLS, default="off", help="controller/world separation (robot.py)")
+    parser.add_argument("--wall", choices=WALLS, default="real", help="controller/world separation (robot.py)")
     args = parser.parse_args()
     interactive = not args.moves
     want_view = (not args.headless) and (args.view or interactive)

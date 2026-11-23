@@ -179,8 +179,8 @@ def _hook_viewer(sim: Sim, viewer) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Engine game replayed on the sim board")
-    parser.add_argument("--gt", action="store_true", help="ground-truth pose (default)")
-    parser.add_argument("--vision", action="store_true", help="wrist RGB-D")
+    parser.add_argument("--gt", action="store_true", help="belief pose without a wrist look (truth only under --wall cheat/off)")
+    parser.add_argument("--vision", action="store_true", help="wrist RGB-D (the default; kept for old commands)")
     parser.add_argument("--game", default="opera", help="famous game: opera, immortal, evergreen")
     parser.add_argument("--max-ply", type=int, default=80)
     parser.add_argument("--headless", action="store_true", help="no viewer")
@@ -190,9 +190,9 @@ def main() -> int:
         action="store_true",
         help="keep playing after a physical fail (collateral, drop, …)",
     )
-    parser.add_argument("--wall", choices=WALLS, default="off", help="controller/world separation (robot.py)")
+    parser.add_argument("--wall", choices=WALLS, default="real", help="controller/world separation (robot.py)")
     args = parser.parse_args()
-    use_vision = bool(args.vision) and not args.gt
+    use_vision = not args.gt
     want_view = not args.headless
     if args.speed is not None:
         clock = float(args.speed) if args.speed >= 1.0 else 1.0 / max(0.05, float(args.speed))
@@ -212,7 +212,7 @@ def main() -> int:
     replay = chess.Board()
     print(f"game  {_game_label(game)}  ply={len(moves)}  result={final.result()}")
     print(replay.variation_san(moves))
-    print(f"perception: {'wrist RGB-D' if use_vision else 'ground truth'}")
+    print(f"perception: {'wrist RGB-D' if use_vision else 'belief (gt)'}  wall: {args.wall}")
     print(f"clock: {clock_scale()}x  viewer: {'on' if want_view else 'off'}")
     if args.keep_going:
         print("keep-going: on  (scored fails do not stop the game)")
@@ -299,6 +299,10 @@ def main() -> int:
                         ok = False
                         break
                 disturbed = evaluate_move.disturbed(world_of(sim), before, skip=involved)
+                placed = {f"{src}{dst}": evaluate_move.placement(world_of(sim), cfg, occ0[src], dst) for src, dst in legs if occ0.get(src)}
+                if ok and not all(p["ok"] for p in placed.values()):
+                    ok = False
+                    last = {**last, "failure_stage": "place", "failure_reason": "NOT_PLACED"}
                 if ok and disturbed:
                     ok = False
                     last = {**last, "failure_stage": "collateral", "failure_reason": "COLLATERAL_KNOCK"}
@@ -315,6 +319,7 @@ def main() -> int:
                     "reason": last.get("failure_reason") if not ok else None,
                     "captured": last.get("captured"),
                     "disturbed": disturbed,
+                    "placed": placed,
                 }
                 log.write(json.dumps(rec) + "\n")
                 log.flush()

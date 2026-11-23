@@ -33,14 +33,11 @@ def main():
         ([str(PY), "sim/test_mj.py"] + (["--quick"] if quick else []), "test_mj"),
     ]
     if not quick:
-        steps.append(([str(PY), "sim/pickup.py", "--headless"], "queen pick-place"))
-        steps.append(([str(PY), "sim/pickup.py", "--headless", "--vision"], "vision pick-place"))
-        steps.append(
-            ([str(PY), "sim/pickup.py", "--headless", "--vision", "--wall", "cheat"], "vision pick-place (robot wall, cheat)")
-        )
-        steps.append(
-            ([str(PY), "sim/pickup.py", "--headless", "--vision", "--wall", "perception"], "vision pick-place (perception only)")
-        )
+        pick = [str(PY), "sim/pickup.py", "--headless"]
+        steps.append((pick + ["--gt", "--wall", "off"], "queen pick-place (gt, no wall)"))
+        steps.append((pick + ["--wall", "off"], "vision pick-place (no wall)"))
+        steps.append((pick + ["--wall", "cheat"], "vision pick-place (robot wall, cheat)"))
+        steps.append((pick, "vision pick-place (robot wall, real)"))
     if "--studies" in sys.argv:
         steps.append(([str(PY), "sim/studies.py"], "studies (quick subsets vs baselines)"))
     results = [run(cmd, label) for cmd, label in steps]

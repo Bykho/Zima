@@ -592,6 +592,48 @@ def test_queen_near_base_place():
     )
 
 
+def test_world_is_physics_only():
+    """Once a robot is open, only physics moves the world: the controller cannot edit it,
+    and a piece or arm written outside physics fails the next step."""
+    import numpy as np
+    from pickup import FULL_BOARD_XML
+    from robot import WorldWrite, open_robot
+
+    cfg = load_config()
+    world = Sim(xml_path=FULL_BOARD_XML, cfg=cfg)
+    world.place_object("pawn_e2", square_to_world("e3", cfg, z=0.02))
+    world.step(10)
+    sim = open_robot(world, "real")
+    refused = []
+    for call in (lambda: sim.place_object("pawn_e3", [0.3, 0.0, 0.02]), lambda: sim.hide_body("board"),
+                 lambda: sim.set_body_pos("board", [0, 0, 0]), lambda: sim.apply_arm_base([0, 0, 0]), sim.reset):
+        try:
+            call()
+        except WorldWrite:
+            refused.append(True)
+    try:
+        world.place_object("pawn_d2", square_to_world("d3", cfg, z=0.02))
+        locked = False
+    except RuntimeError:
+        locked = True
+    sim.step(5)
+    adr = int(world.model.jnt_qposadr[world.model.joint("pawn_d2_free").id])
+    world.data.qpos[adr] += 0.01
+    try:
+        sim.step()
+        caught = False
+    except RuntimeError as e:
+        caught = "pawn_d2" in str(e)
+    world.data.qpos[adr] -= 0.01
+    with world.scene_setup():
+        world.place_object("pawn_d2", square_to_world("d4", cfg, z=0.02))
+    sim.step()
+    moved = float(np.hypot(*(world.body_pose("pawn_d2")[0][:2] - np.asarray(square_to_world("d4", cfg)[:2]))))
+    sim.close()
+    ok = len(refused) == 5 and locked and caught and moved < 0.002
+    return check("world is physics-only after open_robot", ok, f"refused={len(refused)}/5 locked={locked} teleport_caught={caught}")
+
+
 def main():
     quick = "--quick" in sys.argv
     print("Zima MuJoCo tests" + (" (quick)" if quick else "") + "\n")
@@ -606,6 +648,7 @@ def main():
         test_cart_speed_near_far(),
         test_reachable_approach_near_base(),
         test_column_descend_tracks_xy(),
+        test_world_is_physics_only(),
     ]
     if not quick:
         results.append(test_wrist_localize())

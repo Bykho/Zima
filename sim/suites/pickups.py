@@ -156,6 +156,7 @@ def _run(case: dict, wall: str, xml: str) -> dict:
         fc = r.get("first_collision") or {}
         row.update(
             ok=ok,
+            ok_loose=score.get("ok_loose"),
             claimed=claimed,
             reason=r.get("failure_reason") if not claimed else (None if ok else ("COLLATERAL_KNOCK" if score["disturbed"] else "BELIEF_WRONG")),
             stage=None if claimed else episode._failure_stage(r),

@@ -47,6 +47,9 @@ class Sim:
             xml_path = ROOT / xml_path
         self.xml_path = xml_path
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
+        from realism import apply_model
+
+        apply_model(self.model)
         self.data = mujoco.MjData(self.model)
         from fast import clock_scale
 
@@ -65,6 +68,8 @@ class Sim:
         self._probe_depth = 0
         self._arm_adr_all = np.array([self.model.jnt_qposadr[self._joint[n]] for n in JOINT_NAMES], dtype=int)
         self._arm_after_step: np.ndarray | None = None
+        self._scene_after_step: tuple[np.ndarray, np.ndarray] | None = None
+        self._scene_locked = False
         self.apply_arm_base()
         self.apply_board_layout()
         mujoco.mj_resetData(self.model, self.data)
@@ -73,6 +78,7 @@ class Sim:
 
     def apply_arm_base(self, pos=None) -> None:
         """Put the SO-101 base at sim.arm_base_position (MJCF default is the origin)."""
+        self._scene_edit("apply_arm_base")
         if pos is None:
             pos = self.cfg.get("sim", {}).get("arm_base_position", [0.0, 0.0, 0.0])
         bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "base")
@@ -124,20 +130,43 @@ class Sim:
             self.place_object("queen", square_to_world("d1", self.cfg, z=surface))
 
     def reset(self):
+        self._scene_edit("reset")
         mujoco.mj_resetData(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)
         self._place_starting_men()
         self.on_step = None
-        self._arm_after_step = None
+        self.mark_scene_reset()
 
     def pose_arm_for_setup(self, positions: dict[str, float]) -> None:
         """Scene setup only (tests, saved boards): place the arm before the episode runs."""
+        self._scene_edit("pose_arm_for_setup")
         self.set_qpos(positions, hold=True)
-        self._arm_after_step = None
+        self.mark_scene_reset()
 
     def mark_scene_reset(self) -> None:
-        """The whole state was rewound (reset/undo), arm included; not an arm move."""
+        """The whole state was rewound (reset/undo/setup), not moved by physics; the guard restarts."""
         self._arm_after_step = None
+        self._scene_after_step = None
+
+    def lock_scene(self) -> None:
+        """The episode has started: from here only physics moves the world (see `scene_setup`)."""
+        self._scene_locked = True
+
+    @contextmanager
+    def scene_setup(self):
+        """Operator scene edits (an undo, a saved board) on a locked world."""
+        was = self._scene_locked
+        self._scene_locked = False
+        try:
+            yield
+        finally:
+            self.mark_scene_reset()
+            self._scene_locked = was
+
+    def _scene_edit(self, what: str) -> None:
+        if self._scene_locked:
+            raise RuntimeError(f"{what}: scene edit after the episode started (teleport); use scene_setup()")
+        self.mark_scene_reset()
 
     @contextmanager
     def probe(self):
@@ -178,6 +207,23 @@ class Sim:
         if not np.array_equal(now, self._arm_after_step):
             moved = {n: round(float(a - b), 5) for n, a, b in zip(JOINT_NAMES, now, self._arm_after_step) if a != b}
             raise RuntimeError(f"arm joints written outside physics (teleport): {moved}")
+        if self._scene_after_step is None:
+            return
+        qpos0, body_pos0 = self._scene_after_step
+        if not np.array_equal(self.data.qpos, qpos0):
+            moved = sorted({self._qpos_owner(int(i)) for i in np.flatnonzero(self.data.qpos != qpos0)})
+            raise RuntimeError(f"bodies written outside physics (teleport): {moved}")
+        if not np.array_equal(self.model.body_pos, body_pos0):
+            moved = sorted({self.body_name(int(i)) for i in np.flatnonzero((self.model.body_pos != body_pos0).any(axis=1))})
+            raise RuntimeError(f"model bodies moved outside physics (teleport): {moved}")
+
+    def _qpos_owner(self, adr: int) -> str:
+        j = int(np.searchsorted(self.model.jnt_qposadr, adr, side="right")) - 1
+        return self.body_name(int(self.model.jnt_bodyid[j]))
+
+    def _mark_stepped(self) -> None:
+        self._arm_after_step = self.data.qpos[self._arm_adr_all].copy()
+        self._scene_after_step = (self.data.qpos.copy(), self.model.body_pos.copy())
 
     def joint_limits(self) -> dict[str, tuple[float, float]]:
         out = {}
@@ -221,7 +267,7 @@ class Sim:
         if n == 1 or self.on_step is not None:
             for _ in range(n):
                 mujoco.mj_step(self.model, self.data)
-                self._arm_after_step = self.data.qpos[self._arm_adr_all].copy()
+                self._mark_stepped()
                 if self.on_step is not None:
                     self.on_step()
                     self._check_no_teleport()
@@ -231,7 +277,7 @@ class Sim:
         except TypeError:
             for _ in range(n):
                 mujoco.mj_step(self.model, self.data)
-        self._arm_after_step = self.data.qpos[self._arm_adr_all].copy()
+        self._mark_stepped()
 
     def site_pose(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, name)
@@ -262,6 +308,7 @@ class Sim:
         jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{body}_free")
         if jid < 0:
             return False
+        self._scene_edit("place_object")
         adr = self.model.jnt_qposadr[jid]
         dof = self.model.jnt_dofadr[jid]
         self.data.qpos[adr : adr + 3] = np.asarray(xyz, dtype=np.float64)
@@ -278,6 +325,7 @@ class Sim:
         bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
         if bid < 0:
             return False
+        self._scene_edit("hide_body")
         self.model.body_pos[bid, 2] = float(z)
         mujoco.mj_forward(self.model, self.data)
         return True
@@ -287,6 +335,7 @@ class Sim:
         bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
         if bid < 0:
             return False
+        self._scene_edit("set_body_pos")
         self.model.body_pos[bid] = np.asarray(xyz, dtype=np.float64)
         mujoco.mj_forward(self.model, self.data)
         return True

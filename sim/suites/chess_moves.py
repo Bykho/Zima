@@ -200,6 +200,7 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
                 row["mover_believed"] = mover in sim.known
         row.update(
             ok=ok,
+            ok_loose=score["ok_loose"],
             mover_ok=score["mover_ok"],
             victim_gone=score["victim_gone"],
             disturbed=score["disturbed"],

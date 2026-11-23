@@ -1,9 +1,13 @@
 """World-side move scoring, shared by every runner, CLI and test.
 
 Reads the physics world only (`world_of(sim)`), never feeds control. A move
-counts as done when the mover stands upright on its destination, a captured
-piece is gone from the board, and no other piece was disturbed. Knocking over
-or shoving a bystander fails the move even if the mover landed.
+counts as done when the mover rests upright on the board within PLACED_MM of
+its destination centre, released (no robot contact), a captured piece is gone
+from the board, and no other piece was disturbed. Knocking over or shoving a
+bystander fails the move even if the mover landed.
+
+`ok_loose` keeps the older rule (nearest-square snap, about 22 mm, with no
+at-rest check) so scores stay comparable with earlier baselines.
 """
 
 from __future__ import annotations
@@ -12,6 +16,8 @@ import numpy as np
 
 DISPLACED_MM = 8.0
 TILTED_DEG = 30.0
+PLACED_MM = 10.0  # mover centre to destination square centre
+REST_Z_MM = 3.0  # body origin (its base) this close to the board surface = standing on it
 
 
 def tilt_deg(q) -> float:
@@ -45,24 +51,75 @@ def disturbed(world, before: dict, skip=()) -> list[dict]:
     return out
 
 
-def score_board_move(world, cfg: dict, before: dict, mover: str | None, victim: str | None, dst: str) -> dict:
-    """Verdict for one chess move. `before` snapshots every piece on the board before the move."""
+def robot_body_mask(model) -> np.ndarray:
+    """True for the arm's bodies (everything under `base`)."""
+    import mujoco
+
+    base = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "base")
+    mask = np.zeros(model.nbody, dtype=bool)
+    for b in range(model.nbody):
+        p = b
+        while p > 0 and p != base:
+            p = int(model.body_parentid[p])
+        mask[b] = base >= 0 and p == base
+    return mask
+
+
+def robot_touching(world, body: str) -> bool:
+    """Any arm or jaw geom in contact with `body`."""
+    b1, b2 = world.contact_bodies()
+    if b1.size == 0:
+        return False
+    bid = world.body_id(body)
+    robot = world.__dict__.get("_robot_mask")
+    if robot is None:
+        robot = world.__dict__.setdefault("_robot_mask", robot_body_mask(world.model))
+    return bool(np.any(((b1 == bid) & robot[b2]) | ((b2 == bid) & robot[b1])))
+
+
+def placement(world, cfg: dict, body: str, dst: str) -> dict:
+    """Is `body` placed on `dst`: at rest on the board, released, upright, within PLACED_MM of the centre.
+
+    `ok_loose` is the earlier rule: the nearest square is `dst` and the body is upright,
+    which also passed a piece still airborne in the jaws over the square.
+    """
     from sequence import occupied_squares
     from squares import square_to_world
 
+    surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+    p, q = world.body_pose(body)
+    off = float(np.hypot(*(np.asarray(p[:2]) - np.asarray(square_to_world(dst, cfg, z=0.0)[:2])))) * 1000
+    z_mm = (float(p[2]) - surface) * 1000
+    tilt = tilt_deg(q)
+    touch = robot_touching(world, body)
+    upright = tilt < TILTED_DEG
+    at_rest = abs(z_mm) <= REST_Z_MM and not touch
+    return {
+        "ok": bool(at_rest and upright and off <= PLACED_MM),
+        "ok_loose": bool(occupied_squares(world, cfg).get(dst) == body and upright),
+        "at_rest": bool(at_rest),
+        "robot_contact": bool(touch),
+        "xyz_mm": [round(float(v) * 1000, 1) for v in p],
+        "z_mm": round(z_mm, 1),
+        "off_dest_mm": round(off, 1),
+        "tilt": round(tilt, 1),
+    }
+
+
+def score_board_move(world, cfg: dict, before: dict, mover: str | None, victim: str | None, dst: str) -> dict:
+    """Verdict for one chess move. `before` snapshots every piece on the board before the move."""
+    from sequence import occupied_squares
+
     occ_after = occupied_squares(world, cfg)
-    mover_ok = mover is not None and occ_after.get(dst) == mover and tilt_deg(world.body_pose(mover)[1]) < TILTED_DEG
+    place = placement(world, cfg, mover, dst) if mover is not None else None
+    mover_ok = bool(place and place["ok"])
+    mover_ok_loose = bool(place and place["ok_loose"])
     victim_gone = victim is None or victim not in occ_after.values()
     hits = disturbed(world, before, skip=(mover, victim))
-    out = {"ok": bool(mover_ok and victim_gone and not hits), "mover_ok": bool(mover_ok), "victim_gone": bool(victim_gone), "disturbed": hits}
-    if mover is not None:
-        p, q = world.body_pose(mover)
-        dxy = square_to_world(dst, cfg, z=0.0)
-        out["mover_final"] = {
-            "xyz_mm": [round(float(v) * 1000, 1) for v in p],
-            "off_dest_mm": round(float(np.hypot(*(p[:2] - np.asarray(dxy[:2])))) * 1000, 1),
-            "tilt": round(tilt_deg(q), 1),
-        }
+    out = {"ok": bool(mover_ok and victim_gone and not hits), "ok_loose": bool(mover_ok_loose and victim_gone and not hits),
+           "mover_ok": mover_ok, "mover_ok_loose": mover_ok_loose, "victim_gone": bool(victim_gone), "disturbed": hits}
+    if place is not None:
+        out["mover_final"] = {k: place[k] for k in ("xyz_mm", "off_dest_mm", "tilt", "z_mm", "at_rest", "robot_contact")}
     return out
 
 
@@ -115,13 +172,12 @@ LIFTED_MM = 10.0
 
 def score_lift(world, cfg: dict, before: dict, mover: str, dst: str | None = None) -> dict:
     """Verdict for a pick-and-lift: the mover is off the board surface, or (when the
-    episode ran on to a place) upright on `dst`, and no bystander was disturbed."""
-    from sequence import occupied_squares
+    episode ran on to a place) placed on `dst`, and no bystander was disturbed."""
 
     surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
     p, q = world.body_pose(mover)
     lifted = (float(p[2]) - surface) * 1000 > LIFTED_MM
-    placed = dst is not None and occupied_squares(world, cfg).get(dst) == mover and tilt_deg(q) < TILTED_DEG
+    placed = dst is not None and placement(world, cfg, mover, dst)["ok"]
     hits = disturbed(world, before, skip=(mover,))
     return {"ok": bool((lifted or placed) and not hits), "lifted": bool(lifted), "placed": bool(placed), "disturbed": hits,
             "mover_final": {"xyz_mm": [round(float(v) * 1000, 1) for v in p], "tilt": round(tilt_deg(q), 1)}}
