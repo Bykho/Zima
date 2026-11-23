@@ -41,3 +41,12 @@ class Stop:
     """A stage ended the move early with success (e.g. `stop_after: lift`)."""
 
     stage: str
+
+
+@dataclass(frozen=True)
+class Retry:
+    """Another attempt at the same move: its scenario, and notes stamped on that attempt's result."""
+
+    scenario: dict
+    notes: dict
+    retry_log: list | None = None

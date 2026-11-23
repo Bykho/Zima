@@ -46,7 +46,7 @@ from clearance import (
 )
 from perception import estimate_target_pose, observe_piece
 from sensor import capture as capture_wrist, robot_blocks_view, wrist_sees_point
-from stages.types import Move, Stop
+from stages.types import Move, Retry, Stop
 from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
@@ -840,17 +840,8 @@ def _backoff_grasp(sim: Sim, cfg: dict, tid: str, release_open: float) -> None:
     settle_queen(sim, steps=16)
 
 
-def _retry_missed_grasp(
-    sim: Sim,
-    cfg: dict,
-    use_vision: bool,
-    sc: dict,
-    failed: dict,
-    tid: str,
-    surface: float,
-    release_open: float,
-) -> dict | None:
-    """Re-run pickup from the current pose after a miss/drop, if the piece is still up."""
+def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface: float, release_open: float) -> Retry | None:
+    """Pick again from the current pose after a miss/drop, if the piece is still up."""
     attempt = int(sc.get("_grasp_attempt", 0))
     budget = int(pickup_cfg(cfg).get("grasp_retries", 1))
     if attempt >= budget:
@@ -869,14 +860,9 @@ def _retry_missed_grasp(
     nxt["seed_home"] = False
     nxt["reset_board"] = False
     nxt["_grasp_attempt"] = attempt + 1
-    out = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=None, scenario=nxt)
-    out["grasp_retry"] = True
-    out["grasp_attempts"] = attempt + 2
-    out["first_grasp_reason"] = failed.get("failure_reason")
     log = list(failed.get("grasp_retry_log") or [])
     log.append({"attempt": attempt + 1, "reason": failed.get("failure_reason")})
-    out["grasp_retry_log"] = log + list(out.get("grasp_retry_log") or [])
-    return out
+    return Retry(nxt, {"grasp_retry": True, "grasp_attempts": attempt + 2, "first_grasp_reason": failed.get("failure_reason")}, log)
 
 
 def _move_q_hold(sim: Sim, goal_arm: dict, closed: float, duration: float = 0.6) -> None:
@@ -917,79 +903,57 @@ def _js_raise_ee(sim: Sim, z_min: float = 0.10) -> bool:
     return True
 
 
-def _after_pick_fail(
-    sim: Sim,
-    cfg: dict,
-    use_vision: bool,
-    sc: dict,
-    failed: dict,
-    tid: str,
-    surface: float,
-    release_open: float,
-) -> dict | None:
-    reason = failed.get("failure_reason")
-    if reason in ("GRASP_MISS", "LIFT_DROP"):
-        again = _retry_missed_grasp(
-            sim, cfg, use_vision, sc, failed, tid, surface, release_open
-        )
-        if again is not None:
-            return again
-    dest = sc.get("dest")
-    # Carry can drop a standing man a square short (Bxf3 → g3). Re-pick
-    # from here; a nest scoop is for pieces that are actually down.
-    # Bowl dumps use dest=source, so "already on dest" still means retry.
-    on_dest = bool(dest) and square_of_body(sim, cfg, tid) == dest
-    if (
-        reason == "TRANSPORT_DROP"
-        and on_dest
-        and _piece_still_upright(sim, tid, surface, tilt_max=0.5)
-    ):
-        # Already over dest. Scooping it into the cup is the wrong recovery.
-        return None
-    if (
-        reason == "TRANSPORT_DROP"
-        and int(sc.get("_recover_attempt", 0)) < 2
-        and _piece_still_upright(sim, tid, surface, tilt_max=0.5)
-        and (sc.get("place_xyz") is not None or not on_dest)
-    ):
-        nxt = dict(sc)
-        nxt["seed_home"] = True
-        nxt["reset_board"] = False
-        nxt["_from_nest"] = False
-        nxt["_recover_attempt"] = int(sc.get("_recover_attempt", 0)) + 1
-        nxt["_grasp_attempt"] = 0
-        out = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=None, scenario=nxt)
-        out["replaced_after_drop"] = True
-        out["first_grasp_reason"] = reason
-        return out
-    return stages.resolve(cfg)["recovery"].recover(sim, cfg, use_vision, sc, failed, tid, surface, release_open)
+def _retry_policy(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface: float, release_open: float, after: str) -> Retry | None:
+    """The one place a failed attempt becomes another attempt, or none.
 
-
-def _after_place_fail(
-    sim: Sim,
-    cfg: dict,
-    use_vision: bool,
-    sc: dict,
-    failed: dict,
-    tid: str,
-    surface: float,
-    release_open: float,
-) -> dict | None:
-    """Fallen after put-down: scoop into the well, stand up, place again.
-
-    Same path for every piece. Bowl dumps stay down on purpose.
+    after="pick": re-grasp a missed or dropped piece that is still up; re-pick a
+    standing piece dropped short of dest; else the recovery stage.
+    after="place": the recovery stage, except bowl dumps (they stay down on
+    purpose) and a piece still in the jaws; re-scan first if the piece left the belief.
     """
-    if sc.get("place_xyz") is not None:
-        return None
-    if failed.get("failure_reason") == "RELEASE_FAILURE":
-        return None
-    if _perceiving(sim) and tid not in sim.known:
-        stages.resolve(cfg)["board_observe"].scan(sim, cfg)
-        if tid not in sim.known:
-            failed["failure_reason"] = "PIECE_LOST"
-            failed["failure_stage"] = "place"
+    reason = failed.get("failure_reason")
+    if after == "pick":
+        if reason in ("GRASP_MISS", "LIFT_DROP"):
+            again = _grasp_retry(sim, cfg, sc, failed, tid, surface, release_open)
+            if again is not None:
+                return again
+        dest = sc.get("dest")
+        # Carry can drop a standing man a square short (Bxf3 → g3). Re-pick
+        # from here; a nest scoop is for pieces that are actually down.
+        # Bowl dumps use dest=source, so "already on dest" still means retry.
+        on_dest = bool(dest) and square_of_body(sim, cfg, tid) == dest
+        if (
+            reason == "TRANSPORT_DROP"
+            and on_dest
+            and _piece_still_upright(sim, tid, surface, tilt_max=0.5)
+        ):
+            # Already over dest. Scooping it into the cup is the wrong recovery.
             return None
-    return stages.resolve(cfg)["recovery"].recover(sim, cfg, use_vision, sc, failed, tid, surface, release_open)
+        if (
+            reason == "TRANSPORT_DROP"
+            and int(sc.get("_recover_attempt", 0)) < 2
+            and _piece_still_upright(sim, tid, surface, tilt_max=0.5)
+            and (sc.get("place_xyz") is not None or not on_dest)
+        ):
+            nxt = dict(sc)
+            nxt["seed_home"] = True
+            nxt["reset_board"] = False
+            nxt["_from_nest"] = False
+            nxt["_recover_attempt"] = int(sc.get("_recover_attempt", 0)) + 1
+            nxt["_grasp_attempt"] = 0
+            return Retry(nxt, {"replaced_after_drop": True, "first_grasp_reason": reason})
+    else:
+        if sc.get("place_xyz") is not None:
+            return None
+        if reason == "RELEASE_FAILURE":
+            return None
+        if _perceiving(sim) and tid not in sim.known:
+            stages.resolve(cfg)["board_observe"].scan(sim, cfg)
+            if tid not in sim.known:
+                failed["failure_reason"] = "PIECE_LOST"
+                failed["failure_stage"] = "place"
+                return None
+    return stages.resolve(cfg)["recovery"].recover(sim, cfg, sc, failed, tid, surface)
 
 
 def grasp_acquired(sim: Sim, object_id: str | None = None) -> bool:
@@ -1580,12 +1544,14 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
             result["success"] = True
             result["failure_reason"] = None
             return _done()
-        again = None
-        if out.retry == "pick":
-            again = _after_pick_fail(sim, cfg, use_vision, sc, result, tid, surface, release_open)
-        elif out.retry == "place":
-            again = _after_place_fail(sim, cfg, use_vision, sc, result, tid, surface, release_open)
-        return again if again is not None else _done()
+        nxt = _retry_policy(sim, cfg, sc, result, tid, surface, release_open, out.retry) if out.retry else None
+        if nxt is None:
+            return _done()
+        again = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=None, scenario=nxt.scenario)
+        again.update(nxt.notes)
+        if nxt.retry_log is not None:
+            again["grasp_retry_log"] = nxt.retry_log + list(again.get("grasp_retry_log") or [])
+        return again
 
     P["retreat"].unhook(m)
     _collateral_snapshot()

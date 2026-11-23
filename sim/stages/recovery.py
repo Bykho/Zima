@@ -16,7 +16,6 @@ from pickup import (
     _piece_still_upright,
     _reset_ik_seed,
     _xyz,
-    execute_move,
     grasp_acquired,
     in_well,
     log_state,
@@ -32,6 +31,7 @@ from scenario import PIECES, body_kind
 from sequence import square_of_body
 from squares import nest_xyz
 from stages import register
+from stages.types import Retry
 
 
 def _piece_com(sim: Sim, tid: str) -> np.ndarray:
@@ -627,16 +627,8 @@ def recover_to_nest(sim: Sim, cfg: dict, tid: str) -> dict:
     return out
 
 
-def _recover_fallen_then_finish(
-    sim: Sim,
-    cfg: dict,
-    use_vision: bool,
-    sc: dict,
-    failed: dict,
-    tid: str,
-    surface: float,
-    release_open: float,
-) -> dict | None:
+def _recover_fallen(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface: float) -> Retry | None:
+    """A fallen piece is tagged PIECE_FALLEN; with recovery on, scooped into the nest and picked again from there."""
     if int(sc.get("_recover_attempt", 0)) >= 2:
         return None
     dest = sc.get("dest")
@@ -676,16 +668,12 @@ def _recover_fallen_then_finish(
     nxt["_from_nest"] = True
     nxt["_recover_attempt"] = int(sc.get("_recover_attempt", 0)) + 1
     nxt["_grasp_attempt"] = 0
-    out = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=None, scenario=nxt)
-    out["recovered"] = True
-    out["recover"] = rec
-    out["first_grasp_reason"] = failed.get("failure_reason")
-    return out
+    return Retry(nxt, {"recovered": True, "recover": rec, "first_grasp_reason": failed.get("failure_reason")})
 
 
 @register("recovery", "nest")
 class Nest:
     """Tag a fallen piece PIECE_FALLEN; with `pickup.recover_fallen` on, scoop it into the nest, stand it up and pick again."""
 
-    def recover(self, sim, cfg, use_vision, sc, failed, tid, surface, release_open):
-        return _recover_fallen_then_finish(sim, cfg, use_vision, sc, failed, tid, surface, release_open)
+    def recover(self, sim, cfg, sc, failed, tid, surface):
+        return _recover_fallen(sim, cfg, sc, failed, tid, surface)
