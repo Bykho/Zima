@@ -23,6 +23,8 @@ sim:
     place_xy_tol: 0.010
     # Re-grasp-and-re-place tries for a piece the confirm look finds off-centre.
     place_corrections: 2
+    # Correction hop: lift the piece just clear of the board, shift by the miss, set down.
+    place_nudge_hop: 0.004
     # 3/4 of the 0.8 full-open pose. Enough to clear a piece; the joint
     # stop (~1.75) slaps it. Approach may still narrow this for neighbors.
     gripper_open: 0.60

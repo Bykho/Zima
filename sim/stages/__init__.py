@@ -142,7 +142,7 @@ def describe(cfg: dict | None) -> dict:
     return {"pipeline": chosen, "pipeline_params_sha": hashlib.sha256(blob.encode()).hexdigest()[:12]}
 
 
-MODULES = ("observe", "grasp_plan", "approach", "close", "carry", "release", "retreat", "recovery", "unstack")
+MODULES = ("observe", "grasp_plan", "approach", "close", "carry", "nudge", "release", "retreat", "recovery", "unstack")
 
 
 def _load() -> None:

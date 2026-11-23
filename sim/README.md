@@ -77,6 +77,11 @@ variant with labelled rows; `--by variant` compares each
 variant against `--ref` within the run. `meta.json` and each row record the
 selected pipeline and a hash of its parameters. Baselines hold `base` rows only.
 
+A placement correction (the confirm look finds the piece standing more than
+`place_xy_tol` off its square) re-grasps it and runs carry `nudge` instead of
+the selected carry: a hop of `place_nudge_hop`, a shift by the measured miss
+and a set-down, each closed on the joint encoders.
+
 ## Comparing and baselines
 
 ```

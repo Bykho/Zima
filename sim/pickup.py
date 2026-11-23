@@ -863,10 +863,11 @@ def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface:
 
 
 def _place_correction(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface: float) -> Retry | None:
-    """Re-grasp a standing piece where the confirm look saw it and place it on dest again.
+    """Re-grasp a standing piece where the confirm look saw it and nudge it onto dest.
 
     The piece can shift in the jaws during the carry, so the in-hand belief
     drifts; the post-release look measures the real offset and closes the loop.
+    The correction is a hop over its own square (carry `nudge`), not a new carry.
     """
     done = int(sc.get("_place_correction", 0))
     if done >= int(pickup_cfg(cfg).get("place_corrections", 2)):
@@ -878,7 +879,7 @@ def _place_correction(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, sur
         return None
     off_mm = failed.get("placed_off_mm")
     log_state(sim, "retry_place", extra={"attempt": done + 1, "from": here, "off_mm": off_mm})
-    nxt = dict(sc, source=here, seed_home=False, reset_board=False, _grasp_attempt=0, _place_correction=done + 1)
+    nxt = dict(sc, source=here, seed_home=False, reset_board=False, _grasp_attempt=0, _place_correction=done + 1, _nudge=True)
     nxt.setdefault("_first_place_off_mm", off_mm)
     return Retry(nxt, {"place_corrections": done + 1, "first_place_off_mm": nxt["_first_place_off_mm"]})
 
@@ -1569,7 +1570,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
                      open_g=open_g, release_open=release_open, closed_g=closed_g, pre_z=pre_z, grasp_z=grasp_z,
                      lift_z=lift_z, place_hover=place_hover, off_board=off_board, dest_xy=dest_xy, xy_tol=xy_tol).items():
         setattr(m, k, v)
-    P = stages.resolve(cfg)
+    P = stages.resolve(cfg, "carry:nudge" if sc.get("_nudge") else None)
 
     def _end(out):
         if isinstance(out, Stop):
