@@ -55,6 +55,28 @@ Suites measure an episode by subscribing to `diag` trace events (`phase` for
 every `log_state` name, `scan_start`/`scan_end`, `look_start`/`look`) and
 reading the world from the callback; the controller only emits.
 
+## Stages and A/B variants
+
+`execute_move` runs one move as a pipeline of stages, each a registered class
+in `stages/` (`observe`, `grasp_plan`, `approach`, `close`, `carry`,
+`release`, `retreat`, plus `recovery`, `board_observe` and `unstack_policy`).
+`python sim/run.py --list` prints every stage's implementations, default
+first. Selection, later overriding earlier: `stages.DEFAULTS`, the
+`pipeline:` block in `config.yaml`, `ZIMA_PIPELINE`, then `--stage`.
+
+```
+python sim/run.py --suite core --walls cheat --stage carry=legacy_only --tag legacy
+python sim/run.py --suite core --walls cheat --variants base,legacy=carry:legacy_only,plumb=carry:plumb_only --tag ab
+python sim/compare.py runs/ab --by variant --ref base
+```
+
+A spec is `stage:impl[,stage:impl][;stage.key=value]`. In `--variants`, a
+`label=` token starts a variant and a bare `stage:impl` token adds to the one
+before; each variant is layered over `--stage`. Every case runs once per
+variant with labelled rows; `--by variant` compares each
+variant against `--ref` within the run. `meta.json` and each row record the
+selected pipeline and a hash of its parameters. Baselines hold `base` rows only.
+
 ## Comparing and baselines
 
 ```
