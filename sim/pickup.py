@@ -872,6 +872,8 @@ def _place_correction(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, sur
     done = int(sc.get("_place_correction", 0))
     if done >= int(pickup_cfg(cfg).get("place_corrections", 2)):
         return None
+    if _perceiving(sim) and tid not in sim.known:
+        return None
     if not _piece_still_upright(sim, tid, surface, tilt_max=0.5):
         return None
     here = square_of_body(sim, cfg, tid)
