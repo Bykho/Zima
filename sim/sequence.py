@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from clearance import obstacle_bodies, plan_approach
+import stages
+from clearance import obstacle_bodies
 from ik import EE_SITE, grasp_xy_delta, solve_ik
 from mj import probing
 from scenario import PIECES, STARTING_AT, body_kind
@@ -42,7 +43,7 @@ def probe_approach(
     sim, cfg: dict, source: str, tid: str, scenario: dict, at=None,
     require_extract: bool = True, force_roll: float | None = None, lock_roll: bool = False,
 ) -> dict:
-    """plan_approach result for the live occupancy. Restores arm qpos.
+    """The selected approach stage's plan for the live occupancy. Restores arm qpos.
 
     `at` overrides the piece pose so an empty destination square can be
     checked with the same extract envelope as a pickup.
@@ -72,7 +73,7 @@ def probe_approach(
     pre = [float(xyz[0] + dx), float(xyz[1] + dy), surface + pre_z]
     grasp = [float(xyz[0] + dx), float(xyz[1] + dy), surface + grasp_z]
     clutter = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
-    plan = plan_approach(
+    plan = stages.resolve(cfg)["approach"].plan(
         sim, pre, grasp, open_g, clutter, source=source, cfg=cfg, scenario=scenario,
         require_extract=require_extract, force_roll=force_roll, lock_roll=lock_roll,
         target=tid,

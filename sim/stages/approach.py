@@ -319,7 +319,7 @@ def physical_descend(sim: Sim, target, duration: float = 1.2, lock_joints=(), pa
     return report
 
 
-def run(m: Move):
+def run(m: Move, planner=plan_approach):
     """Plan the approach, reach pregrasp, re-look and re-verify, descend to the grasp."""
     sim, cfg, sc, result, tid, surface, source, use_vision, queen_xyz, grasp_z, geom, open_g, plan_xy, grasp_xy, pre, actual = m.sim, m.cfg, m.sc, m.result, m.tid, m.surface, m.source, m.use_vision, m.queen_xyz, m.grasp_z, m.geom, m.open_g, m.plan_xy, m.grasp_xy, m.pre, m.actual
     clutter = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
@@ -332,7 +332,7 @@ def run(m: Move):
         return [xy[0], xy[1], surface + grasp_z]
 
     def _plan(pre_seed, grasp_seed):
-        return plan_approach(
+        return planner(
             sim,
             pre_seed,
             grasp_seed,
@@ -521,5 +521,9 @@ def run(m: Move):
 class VerticalColumn:
     """Collision-free vertical approach, pregrasp, re-look and re-verify, descend to the grasp."""
 
+    def plan(self, sim, pre, grasp, open_g, clutter, **kw) -> dict:
+        """Collision-free pregrasp/roll/aperture for a grasp; also how unstack judges blockers."""
+        return plan_approach(sim, pre, grasp, open_g, clutter, **kw)
+
     def run(self, m):
-        return run(m)
+        return run(m, planner=self.plan)
