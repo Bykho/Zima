@@ -19,6 +19,7 @@ import mujoco
 import numpy as np
 
 from mj import JOINT_NAMES, Sim
+from piece_fit import chord_centre, piece_shape
 
 HIDE_Z = -1.0
 EE_SITE = "gripperframe"
@@ -229,13 +230,27 @@ class Robot(Sim):
                 best, best_d = name, d
         return best
 
+    def _pad_face(self, geom: str, toward) -> np.ndarray:
+        gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom)
+        R = self.data.geom_xmat[gid].reshape(3, 3)
+        half = float(np.abs(R.T @ toward) @ self.model.geom_size[gid])
+        return self.data.geom_xpos[gid] + half * toward
+
     def attach(self, body: str) -> None:
-        """Both pads touch the piece: along the pinch axis it sits midway between them."""
+        """Both pads touch the piece: along the pinch axis its pinched section is centred between the pad faces.
+
+        The section comes from the piece's shape (the belief model) at its believed
+        pose; an asymmetric piece (the knight) sits off its origin there.
+        """
         a = self.geom_xpos(PAD_GEOMS[0])
         b = self.geom_xpos(PAD_GEOMS[1])
         axis = (b - a) / max(float(np.linalg.norm(b - a)), 1e-9)
+        mid = 0.5 * (self._pad_face(PAD_GEOMS[0], axis) + self._pad_face(PAD_GEOMS[1], -axis))
         pb, qb = self.body_pose(body)
-        pb = pb + float(np.dot(0.5 * (a + b) - pb, axis)) * axis
+        pb = pb + float(np.dot(mid - pb, axis)) * axis
+        t = chord_centre(piece_shape(self, body), pb, qb, mid, axis)
+        if t is not None:
+            pb = pb - t * axis
         super().place_object(body, pb, qb)
         pe, Re = self.site_pose(EE_SITE)
         pb, qb = self.body_pose(body)
