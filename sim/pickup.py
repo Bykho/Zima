@@ -36,6 +36,7 @@ from ik import (
     move_qpos,
     reachable_approaches,
     solve_ik,
+    solve_ik_aim,
     solve_ik_down,
 )
 from mj import ARM_JOINTS, DEBUG_DIR, Sim, load_config, probing
@@ -1098,6 +1099,57 @@ def ray_approach_candidates(
     return _unique_xyz(cands)
 
 
+def _cam_in_site(sim: Sim) -> tuple[np.ndarray, np.ndarray]:
+    """Camera look direction and origin, both in the gripperframe. Fixed for a gripper opening."""
+    sid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_SITE, EE_SITE)
+    cid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, "wrist_cam")
+    mujoco.mj_forward(sim.model, sim.data)
+    Rs = sim.data.site_xmat[sid].reshape(3, 3)
+    look = Rs.T @ (-sim.data.cam_xmat[cid].reshape(3, 3)[:, 2])
+    off = Rs.T @ (sim.data.cam_xpos[cid] - sim.data.site_xpos[sid])
+    return look, off
+
+
+def aim_camera_at(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Point the wrist camera at `target_xyz` with the gripperframe held at `ee_xyz`.
+
+    The wedge camera looks along the fingers, so the aim is that axis, not the
+    old pinch-facing mount. One rule for every square.
+    """
+    look_site, cam_off = _cam_in_site(sim)
+    ee = np.asarray(ee_xyz, dtype=float)
+    tgt = np.asarray(target_xyz, dtype=float)
+    sid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_SITE, EE_SITE)
+    for _ in range(4):
+        mujoco.mj_forward(sim.model, sim.data)
+        Rs = sim.data.site_xmat[sid].reshape(3, 3)
+        cam = sim.data.site_xpos[sid] + Rs @ cam_off
+        delta = tgt - cam
+        dist = float(np.linalg.norm(delta))
+        if dist < 1e-4:
+            return False
+        solve_ik_aim(sim, ee, look_site, delta / dist)
+        mujoco.mj_forward(sim.model, sim.data)
+        # The lens is wide. A stalled aim still sees the square when the point
+        # sits in the frustum and the fingertips stayed on the hover.
+        if wrist_sees_point(sim, tgt) and float(np.linalg.norm(sim.data.site_xpos[sid] - ee)) < 0.012:
+            return True
+    return False
+
+
+def _servo_aim(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Physically settle the aim found above. The transit locked the wrist."""
+    start = sim.qpos()
+    with sim.probe():
+        seen = aim_camera_at(sim, ee_xyz, target_xyz)
+        goal = sim.qpos()
+        sim.set_qpos(start, hold=True)
+    if not seen:
+        return False
+    _drive_arm(sim, [goal], float(start.get("gripper", 0.0)), 0.35)
+    return wrist_sees_point(sim, target_xyz)
+
+
 def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
     """Reachable wrist poses that still see target_xyz, safest first."""
     p = pickup_cfg(cfg)
@@ -1117,7 +1169,7 @@ def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
         cands,
         reset=lambda: _reset_ik_seed(sim, cfg),
         upright=True,
-        accept=lambda _c: wrist_sees_point(sim, target),
+        accept=lambda c: aim_camera_at(sim, c, target),
     )
 
 
@@ -1138,6 +1190,8 @@ def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | N
         hidden = None
         for look in looks:
             if _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=duration):
+                if not _servo_aim(sim, look, target_xyz):
+                    continue
                 if not _own_hand_hides(sim, target_xyz):
                     return look
                 hidden = hidden or look
