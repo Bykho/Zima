@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Alias for `sim/run.py` with the old defaults (opening suite, cheat + perception).
+"""Alias for `sim/run.py` with the old defaults (opening suite, cheat + real).
 
 Rows land in runs/<tag>/ and are mirrored to sim/debug/harness/<tag>.{jsonl,txt}.
 
-  python sim/harness.py                              # opening suite, cheat + perception
-  python sim/harness.py --suite opera --walls perception
+  python sim/harness.py                              # opening suite, cheat + real
+  python sim/harness.py --suite opera --walls real
   python sim/harness.py --suite all --jobs 2 --tag baseline
 """
 
@@ -28,7 +28,7 @@ def main() -> int:
     argv = sys.argv[1:]
     if not any(a == "--suite" or a.startswith("--suite=") for a in argv):
         argv = ["--suite", "opening", *argv]
-    return run.main(argv, default_walls="cheat,perception", mirror=OUT)
+    return run.main(argv, default_walls="cheat,real", mirror=OUT)
 
 
 if __name__ == "__main__":

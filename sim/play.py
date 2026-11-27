@@ -2,8 +2,8 @@
 """Interactive persistent-board play.
 
   python sim/play.py              # viewer + prompt (wrist RGB-D; macOS uses mjpython)
-  python sim/play.py --gt         # viewer + prompt, ground-truth pose
-  python sim/play.py --gt --speed 2
+  python sim/play.py --wall cheat # viewer + prompt, true poses (no wrist look)
+  python sim/play.py --speed 2
   python sim/play.py --headless   # prompt only
   python sim/play.py e2 e4 g1 f3  # one-shot moves, then exit
 
@@ -181,7 +181,7 @@ def _hook_viewer(sim: Sim, viewer) -> None:
     sim.on_step = _sync
 
 
-def _run_move(sim, cfg, text: str, use_vision: bool, viewer) -> dict:
+def _run_move(sim, cfg, text: str, viewer) -> dict:
     """play_move plus the world verdict: `ok` also needs the mover on its square and no bystander disturbed."""
     _hook_viewer(sim, viewer)
     try:
@@ -189,7 +189,7 @@ def _run_move(sim, cfg, text: str, use_vision: bool, viewer) -> dict:
     except ValueError:
         src = dst = None
     occ, before = evaluate_move.board_snapshot(world_of(sim), cfg)
-    result = play_move(sim, cfg, text, use_vision=use_vision)
+    result = play_move(sim, cfg, text)
     score = None if dst is None else evaluate_move.score_board_move(world_of(sim), cfg, before, occ.get(src), occ.get(dst), dst)
     result["world"] = score
     result["ok"] = bool(result.get("success") and score and score["ok"])
@@ -208,7 +208,6 @@ def _run_move(sim, cfg, text: str, use_vision: bool, viewer) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Play typed chess moves on a persistent sim board")
     parser.add_argument("moves", nargs="*", help="moves like e2 e4 or e2e4")
-    parser.add_argument("--gt", action="store_true", help="ground-truth pose instead of wrist RGB-D")
     parser.add_argument("--view", action="store_true", help="open MuJoCo viewer (default in interactive mode)")
     parser.add_argument("--headless", action="store_true", help="no viewer")
     parser.add_argument("--speed", type=float, default=None, help="video clock (2 = 2x dt). omit for real-time")
@@ -233,7 +232,6 @@ def main() -> int:
     sim = open_robot(Sim(xml_path=FULL_BOARD_XML, cfg=cfg), args.wall)
     seed_vertical(sim, cfg)
     start = _snapshot(sim)
-    use_vision = not args.gt
 
     viewer = None
     if want_view:
@@ -243,7 +241,7 @@ def main() -> int:
         _hook_viewer(sim, viewer)
 
     print(occupancy_text(sim, cfg))
-    print("perception:", "wrist RGB-D" if use_vision else "ground truth")
+    print("perception:", "true poses (cheat)" if args.wall in ("cheat", "off") else "wrist RGB-D")
     print("e2 e4  |  board  |  reset  |  quit")
 
     code = 0
@@ -259,7 +257,7 @@ def main() -> int:
                     parse_move(joined)
                 except ValueError:
                     continue
-                result = _run_move(sim, cfg, joined, use_vision, viewer)
+                result = _run_move(sim, cfg, joined, viewer)
                 if not result["ok"]:
                     code = 1
                 buf = []
@@ -293,7 +291,7 @@ def main() -> int:
                 if cmd in ("help", "?"):
                     print("e2 e4  |  board  |  reset  |  quit")
                     continue
-                result = _run_move(sim, cfg, line, use_vision, viewer)
+                result = _run_move(sim, cfg, line, viewer)
                 if not result["ok"]:
                     code = 1
     finally:

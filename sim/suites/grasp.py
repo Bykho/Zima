@@ -59,7 +59,7 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
         import pickup
         from evaluate_move import tilt_deg
         from mj import Sim, load_config
-        from robot import jaw_squeezing, open_robot, wall_perception, world_of
+        from robot import jaw_squeezing, open_robot, world_of
         from scenario import PIECES
         from occupancy import occupied_squares
         from squares import square_to_world
@@ -96,7 +96,7 @@ def run_case(case: dict, wall: str, timeout: float) -> dict:
         with diag.subscribe(_on):
             r = pickup.execute_move(sim, cfg, scenario={
                 "target_id": body, "source": case["square"], "dest": case["dest"], "yaw_deg": case["yaw"], "geometry": geom,
-                "perception": wall_perception(wall), "quiet": True, "_grasp_attempt": 99,
+                "quiet": True, "_grasp_attempt": 99,
             })
         wq = world.object_pose(body)
         close, lift = seen.get("005_gripper_closed", {}), seen.get("006_lift", {})

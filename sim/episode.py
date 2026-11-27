@@ -50,7 +50,7 @@ def setup_board(world, cfg: dict, sc: dict, spawn_xy=None) -> None:
     world.place_object(tid, spawn, yaw_quat(float(sc.get("yaw_deg", 0.0))))
 
 
-def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:
+def run_episode(sim, cfg: dict, spawn_xy=None, scenario: dict | None = None) -> dict:
     """Reset once, unstack via execute_move, run the requested move, restack LIFO (no snap-home)."""
     sc = dict(scenario or {})
     p = pickup_cfg(cfg)
@@ -75,7 +75,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
         occ = occupied_squares(sim, cfg)
         sitting = occ.get(square)
         sc_b = sc if (square == source and sitting == tid) else piece_scenario(
-            kind, square, dest, "gt", quiet=True, target_id=sitting or kind
+            kind, square, dest, quiet=True, target_id=sitting or kind
         )
         at = None
         if sitting is None or piece_kind(square, sitting) != kind:
@@ -107,7 +107,6 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
             kind,
             src,
             dst,
-            extra.get("perception", "gt"),
             name=f"seq_{kind}_{src}_{dst}",
             quiet=True,
             reset_board=False,
@@ -115,7 +114,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
             target_id=body,
         )
         try:
-            return execute_move(sim, cfg, use_vision=aux.get("perception") == "vision", scenario=aux)
+            return execute_move(sim, cfg, scenario=aux)
         finally:
             sim.target_id = prev_tid
             sim.on_step = prev_step
@@ -192,7 +191,7 @@ def run_episode(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenari
     target_sc["seed_home"] = False
     if want_lift and stack:
         target_sc["stop_after"] = None
-    result = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=spawn_xy, scenario=target_sc)
+    result = execute_move(sim, cfg, spawn_xy=spawn_xy, scenario=target_sc)
     result["unstack"] = unstack_log
     result["stop_after"] = sc.get("stop_after")
 
@@ -270,7 +269,7 @@ def _restore_capture(sim, cfg: dict, dst: str, snap: dict) -> None:
 
 
 def discard_square(
-    sim, cfg: dict, square: str, use_vision: bool = False, keep_squares: set[str] | None = None,
+    sim, cfg: dict, square: str, keep_squares: set[str] | None = None,
     defer_restack: bool = False,
 ) -> dict:
     """Pick the piece on `square` and drop it in the capture bowl."""
@@ -285,7 +284,6 @@ def discard_square(
         kind,
         square,
         square,
-        "vision" if use_vision else "gt",
         name=f"discard_{kind}_{square}",
         populated=True,
         reset_board=False,
@@ -295,7 +293,7 @@ def discard_square(
         keep_squares=sorted(keep_squares or ()),
         defer_restack=defer_restack,
     )
-    result = run_episode(sim, cfg, use_vision=use_vision, scenario=sc)
+    result = run_episode(sim, cfg, scenario=sc)
     if result.get("success"):
         try:
             dumped_xyz, _ = sim.object_pose(body)
@@ -336,14 +334,13 @@ def restack_parked(sim, cfg: dict, frames: list[dict]) -> dict:
             kind,
             frame["park"],
             frame["home"],
-            "gt",
             name=f"restack_{kind}_{frame['park']}_{frame['home']}",
             quiet=True,
             reset_board=False,
             seed_home=False,
             target_id=body,
         )
-        moved = execute_move(sim, cfg, use_vision=False, scenario=sc)
+        moved = execute_move(sim, cfg, scenario=sc)
         entry = {
             "kind": kind,
             "home": frame["home"],
@@ -357,7 +354,7 @@ def restack_parked(sim, cfg: dict, frames: list[dict]) -> dict:
     return {"ok": ok, "restack": log}
 
 
-def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
+def play_move(sim, cfg: dict, text: str) -> dict:
     """Parse a text move, run it through run_episode on the live board. No chess rules."""
     scan_info = None
     if _perceiving(sim):
@@ -393,7 +390,7 @@ def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
     if dst in occ:
         captured = piece_kind(dst, occ[dst])
         dumped = discard_square(
-            sim, cfg, dst, use_vision=use_vision, keep_squares={src}, defer_restack=True
+            sim, cfg, dst, keep_squares={src}, defer_restack=True
         )
         if not dumped.get("success"):
             dumped["source"] = src
@@ -418,14 +415,13 @@ def play_move(sim, cfg: dict, text: str, use_vision: bool = True) -> dict:
         kind,
         src,
         dst,
-        "vision" if use_vision else "gt",
         name=f"play_{kind}_{src}_{dst}",
         populated=True,
         reset_board=False,
         quiet=True,
         target_id=body,
     )
-    result = run_episode(sim, cfg, use_vision=use_vision, scenario=sc)
+    result = run_episode(sim, cfg, scenario=sc)
     if parked:
         restored = restack_parked(sim, cfg, parked)
         result["capture_restack"] = restored.get("restack")
@@ -474,5 +470,5 @@ def _failure_stage(result: dict) -> str:
     return reason or "unknown"
 
 
-def run_pickup(sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:
-    return run_episode(sim, cfg, use_vision=use_vision, spawn_xy=spawn_xy, scenario=scenario)
+def run_pickup(sim, cfg: dict, spawn_xy=None, scenario: dict | None = None) -> dict:
+    return run_episode(sim, cfg, spawn_xy=spawn_xy, scenario=scenario)

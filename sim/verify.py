@@ -34,9 +34,8 @@ def main():
     ]
     if not quick:
         pick = [str(PY), "sim/pickup.py", "--headless"]
-        steps.append((pick + ["--gt", "--wall", "off"], "queen pick-place (gt, no wall)"))
-        steps.append((pick + ["--wall", "off"], "vision pick-place (no wall)"))
-        steps.append((pick + ["--wall", "cheat"], "vision pick-place (robot wall, cheat)"))
+        steps.append((pick + ["--wall", "off"], "pick-place (no wall, true poses)"))
+        steps.append((pick + ["--wall", "cheat"], "pick-place (robot wall, cheat: true poses)"))
         steps.append((pick, "vision pick-place (robot wall, real)"))
     if "--studies" in sys.argv:
         steps.append(([str(PY), "sim/studies.py"], "studies (quick subsets vs baselines)"))

@@ -1,0 +1,56 @@
+{
+  "tag": "s14b",
+  "suites": [
+    "core",
+    "grasp",
+    "matrix",
+    "starting",
+    "neighbors",
+    "offsets",
+    "perception_error",
+    "transport"
+  ],
+  "walls": [
+    "cheat",
+    "real"
+  ],
+  "jobs": 4,
+  "only": [],
+  "ids": null,
+  "episodes": 726,
+  "variants": [
+    {
+      "label": "base",
+      "pipeline": ""
+    }
+  ],
+  "started": "2026-11-23T12:04:59",
+  "commit": "03f49e293c9a26335b30e04573475979626c010a",
+  "dirty": false,
+  "diff_sha": null,
+  "config_sha": "09a20edde715bf2f",
+  "host": "cursor",
+  "platform": "Linux-6.12.113+-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "python": "3.12.3",
+  "mujoco": "4.0.1",
+  "numpy": "2.5.5",
+  "variant": "base",
+  "worker_mem_cap_gb": 3.0,
+  "total_mem_cap_gb": 12.0,
+  "argv": [
+    "sim/run.py",
+    "--suite",
+    "core,grasp,matrix,starting,neighbors,offsets,perception_error,transport",
+    "--walls",
+    "cheat,real",
+    "--jobs",
+    "4",
+    "--tag",
+    "s14b"
+  ],
+  "finished": "2026-11-23T12:39:32",
+  "wall_clock_s": 2074,
+  "baseline": "starting_real",
+  "from_run": "s14c"
+}

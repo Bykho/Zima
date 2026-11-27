@@ -2,8 +2,9 @@
 """Pick and place: queen → lift → d4 → release.
 
   python sim/pickup.py --headless
-  python sim/pickup.py --headless --vision
-  python sim/pickup.py --headless --vision --random --seed 0 --video
+  python sim/pickup.py --headless                # wall real: wrist look
+  python sim/pickup.py --headless --wall cheat   # true poses, no look (the perception-free control)
+  python sim/pickup.py --headless --random --seed 0 --video
 """
 
 from __future__ import annotations
@@ -1247,7 +1248,7 @@ def _verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
 VERIFY_UPRIGHT_FRAC = 0.7
 
 
-def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, scenario: dict | None = None) -> dict:
+def execute_move(sim: Sim, cfg: dict, spawn_xy=None, scenario: dict | None = None) -> dict:
     """Run one move through the stage pipeline (`stages.resolve(cfg)`); world-side scoring stays here."""
     sc = dict(scenario or {})
     p = pickup_cfg(cfg)
@@ -1256,8 +1257,9 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
     sim.quiet = bool(sc.get("quiet", False) or getattr(sim, "quiet", False))
     source = sc.get("source", p.get("source", "d1"))
     dest = sc.get("dest", p.get("dest", "d4"))
-    perception = sc.get("perception", "vision" if use_vision else "gt")
-    use_vision = perception == "vision"
+    # The wrist look is how a robot without truth knows where pieces are; cheat/off read the true pose (the control).
+    use_vision = _perceiving(sim)
+    perception = "vision" if use_vision else "truth"
     offset_xy = [float(v) for v in sc.get("offset_xy", [0.0, 0.0])]
     yaw_deg = float(sc.get("yaw_deg", 0.0))
     geom = dict(sc.get("geometry") or PIECES.get(body_kind(tid) or tid) or {})
@@ -1582,7 +1584,7 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
         nxt = _retry_policy(sim, cfg, sc, result, tid, surface, release_open, out.retry) if out.retry else None
         if nxt is None:
             return _done()
-        again = execute_move(sim, cfg, use_vision=use_vision, spawn_xy=None, scenario=nxt.scenario)
+        again = execute_move(sim, cfg, spawn_xy=None, scenario=nxt.scenario)
         again.update(nxt.notes)
         if nxt.retry_log is not None:
             again["grasp_retry_log"] = nxt.retry_log + list(again.get("grasp_retry_log") or [])
@@ -1620,8 +1622,6 @@ def execute_move(sim: Sim, cfg: dict, use_vision: bool = False, spawn_xy=None, s
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--vision", action="store_true", help="wrist RGB-D pose (the default; kept for old commands)")
-    parser.add_argument("--gt", action="store_true", help="belief pose instead of a wrist look (truth only under --wall cheat/off)")
     parser.add_argument("--full-board", action="store_true", help="load starting-position chess_scene_full.xml")
     parser.add_argument("--random", action="store_true", help="spawn queen at a random on-board XY, not a square")
     parser.add_argument("--seed", type=int, default=0)
@@ -1630,7 +1630,6 @@ def main():
     stages.cli_arg(parser)
     args = parser.parse_args()
     stages.select(args.stage)
-    args.vision = not args.gt
     cfg = load_config()
     spawn_xy = None
     if args.random:
@@ -1642,7 +1641,7 @@ def main():
     if args.full_board:
         from scenario import full_board_scenario
 
-        sc = full_board_scenario(perception="vision" if args.vision else "gt")
+        sc = full_board_scenario()
     from episode import run_pickup, setup_board
 
     world = Sim(xml_path=xml, cfg=cfg)
@@ -1650,13 +1649,13 @@ def main():
     sim = open_robot(world, args.wall)
     rec = None
     if args.video:
-        tag = "vision" if args.vision else "gt"
+        tag = args.wall
         if args.random:
             tag += f"_random{args.seed}"
         rec = VideoRecorder(sim, DEBUG_DIR / "pickup" / f"{tag}.mp4")
         sim.on_step = rec.grab
     try:
-        result = run_pickup(sim, cfg, use_vision=args.vision, spawn_xy=spawn_xy, scenario=sc)
+        result = run_pickup(sim, cfg, spawn_xy=spawn_xy, scenario=sc)
         if rec is not None:
             rec.save()
             print(f"video: {rec.path} ({len(rec.frames)} frames)")
