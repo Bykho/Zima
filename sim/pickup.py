@@ -1150,25 +1150,8 @@ def _servo_aim(sim: Sim, ee_xyz, target_xyz) -> bool:
     return wrist_sees_point(sim, target_xyz)
 
 
-def _axis_deg(sim: Sim, point) -> float:
-    """Angle between the wrist lens axis and the direction to `point`."""
-    cid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, "wrist_cam")
-    mujoco.mj_forward(sim.model, sim.data)
-    look = -sim.data.cam_xmat[cid].reshape(3, 3)[:, 2]
-    delta = np.asarray(point, dtype=float) - sim.data.cam_xpos[cid]
-    dist = float(np.linalg.norm(delta))
-    if dist < 1e-6:
-        return 180.0
-    return float(np.degrees(np.arccos(np.clip(float(np.dot(look, delta / dist)), -1.0, 1.0))))
-
-
 def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
-    """Hovers that see `target_xyz`, the one aimed at it first.
-
-    A wide frustum still sees a point at the edge of the frame. That short
-    look is the base of the piece, so the pose is shifted and reads as lying.
-    The hover that puts the point nearest the lens axis is the one we keep.
-    """
+    """Reachable wrist poses that still see target_xyz, safest first."""
     p = pickup_cfg(cfg)
     board = cfg["sim"]["board"]
     surface = float(board["surface_z"])
@@ -1181,24 +1164,13 @@ def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
         lower_z=(),
         ring_zs=(surface + observe_z, surface + 0.08),
     )
-    ranked: list[tuple[float, list[float]]] = []
-
-    def accept(c) -> bool:
-        if not aim_camera_at(sim, c, target):
-            return False
-        ranked.append((_axis_deg(sim, target), [float(v) for v in c]))
-        return True
-
-    hits = reachable_approaches(
+    return reachable_approaches(
         sim,
         cands,
         reset=lambda: _reset_ik_seed(sim, cfg),
         upright=True,
-        accept=accept,
+        accept=lambda c: aim_camera_at(sim, c, target),
     )
-    rank = {tuple(np.round(xyz, 5)): ang for ang, xyz in ranked}
-    hits.sort(key=lambda xyz: rank.get(tuple(np.round(xyz, 5)), 1e9))
-    return hits
 
 
 def _own_hand_hides(sim: Sim, target_xyz) -> bool:
@@ -1209,26 +1181,16 @@ def _own_hand_hides(sim: Sim, target_xyz) -> bool:
     return any(robot_blocks_view(sim, p, _robot_bid_array(sim)) for p in (base, top))
 
 
-def _top_of(cfg: dict, target_xyz, tid: str) -> np.ndarray:
-    """The point a standing piece on this square holds up to the lens."""
-    surface = float(cfg["sim"]["board"]["surface_z"])
-    height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
-    top = np.array(target_xyz, dtype=float)
-    top[2] = surface + height
-    return top
-
-
 def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | None:
-    """Move to a wrist pose that sees the top of the piece. Raise or reseeds if stuck."""
+    """Move to a wrist pose that sees target_xyz. Raise or reseeds if stuck."""
     lock = ("wrist_flex", "wrist_roll")
     obstacles = obstacle_bodies(sim, skip={tid})
-    aim = _top_of(cfg, target_xyz, tid)
 
     def _try(looks, duration: float) -> list[float] | None:
         hidden = None
         for look in looks:
             if _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=duration):
-                if not _servo_aim(sim, look, aim):
+                if not _servo_aim(sim, look, target_xyz):
                     continue
                 if not _own_hand_hides(sim, target_xyz):
                     return look
@@ -1237,15 +1199,15 @@ def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | N
             return hidden
         return None
 
-    hit = _try(find_observe_poses(sim, cfg, aim), 0.8)
+    hit = _try(find_observe_poses(sim, cfg, target_xyz), 0.8)
     if hit is not None:
         return hit
     _js_raise_ee(sim, z_min=0.12)
-    hit = _try(find_observe_poses(sim, cfg, aim), 0.8)
+    hit = _try(find_observe_poses(sim, cfg, target_xyz), 0.8)
     if hit is not None:
         return hit
     seed_vertical(sim, cfg)
-    return _try(find_observe_poses(sim, cfg, aim), 0.9)
+    return _try(find_observe_poses(sim, cfg, target_xyz), 0.9)
 
 
 def find_pregrasp_poses(sim: Sim, cfg: dict, grasp_xy) -> list[list[float]]:
@@ -1284,16 +1246,15 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         return None
     if hasattr(sim, "believe"):
         surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
-        # The wedge lens looks along the fingers. A low frame can still hold
-        # the square while the top of the piece is outside the image. That
-        # cloud is only the base: it is stored as lying, and its center is
-        # off the stem, so a standing piece is called fallen or the pinch
-        # misses. A frame that does not see the top does not replace one that did.
-        height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
-        crown = np.array(square_to_world(square, cfg, z=surface + height), dtype=float)
-        if tid in sim.known and not wrist_sees_point(sim, crown):
+        # The wedge lens looks along the fingers. At the pregrasp that aim has
+        # carried it past the square: a sliver of the base is still in the crop,
+        # and taking it as the pose shifts the pinch onto the piece. A frame
+        # that no longer sees the square does not replace one that did.
+        center = square_to_world(square, cfg, z=surface)
+        if tid in sim.known and not wrist_sees_point(sim, center):
             return None
         seen = observe_piece(obs, cfg, square, grow=1.0)
+        height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
         hidden = _own_hand_hides(sim, square_to_world(square, cfg, z=surface))
         upright = seen is None or hidden or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
         quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
