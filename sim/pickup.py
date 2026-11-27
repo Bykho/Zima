@@ -1302,6 +1302,27 @@ def find_pregrasp_pose(sim: Sim, cfg: dict, grasp_xy) -> list[float] | None:
     return hits[0] if hits else None
 
 
+def _already_upright(sim, tid: str) -> bool:
+    known = getattr(sim, "known", None)
+    if known is None or tid not in known:
+        return False
+    _, quat = sim.object_pose(tid)
+    return queen_upright(quat)
+
+
+def _short_view_of_standing(sim, cfg: dict, square: str, seen, height: float) -> bool:
+    """The crown is outside the frame, so a low cloud is the view, not a fallen piece.
+
+    A lying body shows a low extent while the standing crown is still in the
+    lens. A column cut off above the base does not.
+    """
+    if seen is None or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height:
+        return False
+    surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+    crown = square_to_world(square, cfg, z=surface + float(height))
+    return not wrist_sees_point(sim, crown)
+
+
 def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray | None:
     """RGB-D estimate from the wrist sensor. Ground truth is logged for evaluation only."""
     tid = _tid(sim)
@@ -1323,7 +1344,15 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         seen = observe_piece(obs, cfg, square, grow=1.0)
         height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
         hidden = _own_hand_hides(sim, square_to_world(square, cfg, z=surface))
-        upright = seen is None or hidden or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+        # A later frame may replace an upright belief with a fallen one only
+        # when the cloud is what a lying piece shows. A short view, crown
+        # outside the frame, is not that.
+        upright = (
+            seen is None
+            or hidden
+            or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+            or (_already_upright(sim, tid) and _short_view_of_standing(sim, cfg, square, seen, height))
+        )
         quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
         result["observed_top_h_mm"] = None if seen is None else round(seen["top_h"] * 1000, 1)
         result["observe_hidden"] = hidden
@@ -1362,7 +1391,9 @@ def _verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
         sim.forget(tid)
         return {"looked": True, "seen": False}
     height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
-    upright = seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+    upright = seen["top_h"] > VERIFY_UPRIGHT_FRAC * height or (
+        _already_upright(sim, tid) and _short_view_of_standing(sim, cfg, square, seen, height)
+    )
     xy, fitted = seen["xy"], False
     if upright:
         fit = fit_upright_xy(obs, cfg, piece_shape(sim, tid), seen["xy"])
