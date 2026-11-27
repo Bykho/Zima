@@ -50,14 +50,14 @@ from clearance import (
     obstacle_bodies,
 )
 from perception import estimate_target_pose, observe_piece
-from piece_fit import fit_upright_xy, piece_shape
+from piece_fit import fit_upright_xy, piece_shape, pinch_axis, section_centre, symmetric
 from sensor import capture as capture_wrist, robot_blocks_view, wrist_sees_point
 from stages.types import Move, Retry, Stop
 from squares import bowl_xyz, jitter_near_square, nest_xyz, square_to_world
 from metrics import annotate_episode
 from scenario import PIECE_BODIES, PIECES, STARTING_AT, body_kind
 from occupancy import square_of_body
-from robot import GRIP_SETTLE_STEPS, GRIP_STILL_RADS, GRIP_STILL_READS, WALLS, jaw_squeezing, open_robot, world_of
+from robot import GRIP_SETTLE_STEPS, GRIP_STILL_RADS, GRIP_STILL_READS, WALLS, GroundTruthAccess, jaw_squeezing, open_robot, world_of
 
 ARM_BODIES = ("base", "shoulder", "upper_arm", "lower_arm")
 FULL_BOARD_XML = ROOT / "assets/so101/chess_scene_full.xml"
@@ -1181,6 +1181,45 @@ def find_pregrasp_pose(sim: Sim, cfg: dict, grasp_xy) -> list[float] | None:
     return hits[0] if hits else None
 
 
+def _upright_quat(shape: list[tuple], fit: dict) -> tuple[float, float, float, float]:
+    """Upright belief orientation: the fitted yaw when the piece's shape has one."""
+    return (1.0, 0.0, 0.0, 0.0) if symmetric(shape) else yaw_quat(np.degrees(fit["yaw"]))
+
+
+def pinch_aim_xy(sim, tid: str, piece_xy, z: float) -> list[float]:
+    """Where the jaws should centre: the piece's cross-section at grasp height, not its origin.
+
+    Same point for a round piece; an asymmetric one (the knight's body) is off its base there.
+    """
+    try:
+        pos, quat = sim.object_pose(tid)
+    except GroundTruthAccess:
+        return [float(piece_xy[0]), float(piece_xy[1])]
+    if not queen_upright(quat, tilt_max=0.5):
+        return [float(piece_xy[0]), float(piece_xy[1])]
+    c = section_centre(piece_shape(sim, tid), float(z) - float(pos[2]))
+    if c is None:
+        return [float(piece_xy[0]), float(piece_xy[1])]
+    R = np.zeros(9)
+    mujoco.mju_quat2Mat(R, np.asarray(quat, dtype=float))
+    d = R.reshape(3, 3)[:2, :2] @ c
+    return [float(piece_xy[0] + d[0]), float(piece_xy[1] + d[1])]
+
+
+def pinch_heading(sim, tid: str, z: float) -> float | None:
+    """World heading (mod pi) the pinch axis should take on an upright piece at height `z`; None if any will do."""
+    try:
+        pos, quat = sim.object_pose(tid)
+    except GroundTruthAccess:
+        return None
+    if not queen_upright(quat, tilt_max=0.5):
+        return None
+    a = pinch_axis(piece_shape(sim, tid), float(z) - float(pos[2]))
+    if a is None:
+        return None
+    return a + 2.0 * float(np.arctan2(quat[3], quat[0]))
+
+
 def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray | None:
     """RGB-D estimate from the wrist sensor. Ground truth is logged for evaluation only."""
     tid = _tid(sim)
@@ -1199,6 +1238,13 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
         result["observed_top_h_mm"] = None if seen is None else round(seen["top_h"] * 1000, 1)
         result["observe_hidden"] = hidden
+        if seen is not None and upright and not hidden:
+            shape = piece_shape(sim, tid)
+            fit = fit_upright_xy(obs, cfg, shape, est[:2])
+            result["observe_fitted"] = fit is not None
+            if fit is not None:
+                est = np.array([fit["xy"][0], fit["xy"][1], float(est[2])])
+                quat = _upright_quat(shape, fit)
         sim.believe(tid, [float(est[0]), float(est[1]), surface], quat)
     err = float(np.linalg.norm(est[:2] - gt[:2]))
     result["estimated_position_error_mm"] = err * 1000.0
@@ -1236,11 +1282,13 @@ def _verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
     height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
     upright = seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
     xy, fitted = seen["xy"], False
+    quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
     if upright:
-        fit = fit_upright_xy(obs, cfg, piece_shape(sim, tid), seen["xy"])
+        shape = piece_shape(sim, tid)
+        fit = fit_upright_xy(obs, cfg, shape, seen["xy"])
         if fit is not None:
             xy, fitted = fit["xy"], True
-    quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
+            quat = _upright_quat(shape, fit)
     sim.believe(tid, [xy[0], xy[1], surface], quat)
     return {"looked": True, "seen": True, "upright": upright, "top_h_mm": round(seen["top_h"] * 1000, 1), "xy": xy, "fitted": fitted}
 

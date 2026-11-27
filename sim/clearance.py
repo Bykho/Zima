@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ik import solve_ik, solve_ik_down, solve_ik_upright
+from ik import EE_SITE, solve_ik, solve_ik_down, solve_ik_upright
 from mj import probing
 from occupancy import neighbor_occupancy
 from squares import parse_square
@@ -25,6 +25,7 @@ APPROACH_BODIES = ("gripper", "moving_jaw_so101_v1", "camera_mount", "wrist", "l
 PALM_BODIES = ("gripper", "camera_mount", "wrist")
 JAW_ONLY_BODIES = ("gripper", "moving_jaw_so101_v1")
 _ROLL_GRID_RAD = 0.35
+_PINCH_ALIGN_BUCKET_DEG = 10.0
 # Whole descend, grasp point included. The old (0.30, 0.55, 0.80) stopped
 # short of the grasp, so a moving jaw that ended 3 mm inside the neighbor
 # passed as "clear" and knocked it over on every 7th-rank pawn.
@@ -873,6 +874,7 @@ def plan_approach(
     grasp_for_roll=None,
     target: str | None = None,
     margin: float | None = None,
+    pinch_heading: float | None = None,
 ) -> dict:
     """First collision-free reachable approach around the frozen grasp XY.
 
@@ -880,6 +882,9 @@ def plan_approach(
     few pregrasp XY offsets away from occupied neighbors. Grasp XY is frozen.
     A candidate must also clear locked-wrist +Z extract. Empty occupancy
     returns the current default (unlocked roll, open gripper).
+
+    `pinch_heading` (world, mod pi) puts rolls whose pinch axis lies along it
+    first: a flat-sided piece pinched across its corners slips out.
     """
     start = sim.qpos()
     pre0 = np.asarray(pre, dtype=float)
@@ -914,11 +919,47 @@ def plan_approach(
     q["gripper"] = float(open_g)
     sim.set_qpos(q, hold=True)
     base_roll = float(start["wrist_roll"])
+    q_pre = None
     for dx, dy in xy_list:
         if solve_ik(sim, pre_at(dx, dy)):
             base_roll = float(sim.qpos()["wrist_roll"])
+            q_pre = sim.qpos()
             break
     restore()
+    lo, hi = sim.joint_limits()["wrist_roll"]
+    misalign: dict[float, float] = {}
+    aligned: list[float] = []
+    if pinch_heading is not None and q_pre is not None:
+
+        def _heading(r: float) -> float:
+            sim.set_qpos({**q_pre, "wrist_roll": float(r)}, hold=True)
+            _, R = sim.site_pose(EE_SITE)
+            return float(np.arctan2(R[1, 2], R[0, 2]))
+
+        def _off(h: float) -> float:
+            return float(np.degrees(abs((h - pinch_heading + np.pi / 2) % np.pi - np.pi / 2)))
+
+        h0 = _heading(base_roll)
+        slope = (_heading(base_roll + 0.1) - h0) / 0.1
+        if abs(slope) > 0.5:
+            d = ((pinch_heading - h0 + np.pi / 2) % np.pi - np.pi / 2) / slope
+            for k in range(-2, 3):
+                r = base_roll + d + k * np.pi / abs(slope)
+                if lo + 0.02 <= r <= hi - 0.02:
+                    aligned.append(float(r))
+        for r in [base_roll, *aligned]:
+            misalign[round(float(r), 4)] = _off(_heading(float(r)))
+        restore()
+
+    def _align(v: float) -> int:
+        if not misalign:
+            return 0
+        k = round(float(v), 4)
+        if k not in misalign:
+            misalign[k] = _off(_heading(float(v)))
+            restore()
+        return int(misalign[k] // _PINCH_ALIGN_BUCKET_DEG)
+
     level_roll = _level_pads_roll(sim, grasp, base_roll)
     restore()
 
@@ -931,8 +972,7 @@ def plan_approach(
     # so deltas around it made success depend on history. Scan an absolute
     # grid over the joint range instead, ordered by distance from the natural
     # roll; the pad-leveling roll goes first when the pinch cannot be vertical.
-    rolls: list[float] = []
-    lo, hi = sim.joint_limits()["wrist_roll"]
+    rolls: list[float] = [r for r in sorted(aligned, key=lambda v: abs(v - base_roll)) if _align(r) == 0]
     tilt_deg = _grasp_tilt_deg(sim, grasp, base_roll)
     restore()
     # Pinch tilt for a roll r is asin(sin(tilt) * sin(r - level)). When the
@@ -947,11 +987,11 @@ def plan_approach(
 
         def _key(v: float):
             pinch = tilt_deg * abs(np.sin(float(v) - level_roll))
-            return (round(pinch / 2.0), abs(float(v) - base_roll))
+            return (round(pinch / 2.0), _align(v), abs(float(v) - base_roll))
     else:
 
         def _key(v: float):
-            return (0, abs(float(v) - base_roll))
+            return (0, _align(v), abs(float(v) - base_roll))
 
     if all(abs(base_roll - x) > 0.15 for x in rolls):
         rolls.append(base_roll)
@@ -960,7 +1000,7 @@ def plan_approach(
         r = float(r)
         if all(abs(r - x) > 0.15 for x in rolls):
             rolls.append(r)
-    if tilt_deg >= 3.0:
+    if tilt_deg >= 3.0 or misalign:
         rolls = sorted(rolls, key=_key)
     roll_cands: list[tuple[int, float | None, float]] = []
     rank = 0
@@ -978,12 +1018,13 @@ def plan_approach(
     reachable = 0
     tried = 0
     if not neighbors and not lock_roll:
+        roll0 = rolls[0] if misalign else base_roll
         restore()
-        grasp0 = grasp if grasp_for_roll is None else np.asarray(grasp_for_roll(base_roll), dtype=float)
+        grasp0 = grasp if grasp_for_roll is None else np.asarray(grasp_for_roll(roll0), dtype=float)
         restore()
         return {
             "ok": True,
-            "roll": float(base_roll),
+            "roll": float(roll0),
             "gripper": float(open_g),
             "lock_joints": ("wrist_roll",),
             "n_wp": 1,

@@ -325,10 +325,11 @@ def run(m: Move, planner=plan_approach):
     clutter = [n for n in obstacle_bodies(sim, skip={tid}) if n != "board"]
     result["occupied_neighbors"] = sorted(clutter)
     grasp_plan = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
+    aim_xy = m.aim_xy
 
     def _grasp_for_roll(roll: float | None) -> list[float]:
         # The pinch axis rotates with wrist roll, so the fixed-pad shift does too.
-        xy = _grasp_xy_for_roll(sim, plan_xy, surface + grasp_z, geom, roll)
+        xy = _grasp_xy_for_roll(sim, aim_xy, surface + grasp_z, geom, roll)
         return [xy[0], xy[1], surface + grasp_z]
 
     def _plan(pre_seed, grasp_seed):
@@ -343,6 +344,7 @@ def run(m: Move, planner=plan_approach):
             scenario=sc,
             grasp_for_roll=_grasp_for_roll,
             target=tid,
+            pinch_heading=pickup.pinch_heading(sim, tid, surface + grasp_z),
         )
 
     approach = _plan(pre, grasp_plan)
@@ -423,7 +425,8 @@ def run(m: Move, planner=plan_approach):
             queen_xyz = refined
             # Looked up on the module: the perception_error suite wraps it to inject error.
             plan_xy = pickup.perceived_xy(sim, queen_xyz)
-            grasp_xy = _grasp_xy_for_roll(sim, plan_xy, surface + grasp_z, geom, approach.get("roll"))
+            aim_xy = pickup.pinch_aim_xy(sim, tid, plan_xy, surface + grasp_z)
+            grasp_xy = _grasp_xy_for_roll(sim, aim_xy, surface + grasp_z, geom, approach.get("roll"))
             # The plan was verified against the long-range estimate. Re-check
             # the chosen approach on the refined grasp; if the jaws would now
             # clip a bystander, re-plan from here before going down.

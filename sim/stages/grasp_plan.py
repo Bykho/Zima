@@ -38,7 +38,7 @@ def _seeded_grasp_xy(sim: Sim, cfg: dict, piece_xy, geom: dict | None, z: float)
 
 
 def plan(m: Move):
-    """Grasp XY from the pinch model, wrist pitched vertical, pregrasp pose."""
+    """Grasp XY from the pinch model on the piece's cross-section at grasp height, wrist pitched vertical, pregrasp pose."""
     sim, cfg, result, surface, queen_xyz, grasp_z, geom, pre_z = m.sim, m.cfg, m.result, m.surface, m.queen_xyz, m.grasp_z, m.geom, m.pre_z
     # Looked up on the module: the perception_error suite wraps it to inject error.
     plan_xy = pickup.perceived_xy(sim, queen_xyz)
@@ -47,12 +47,13 @@ def plan(m: Move):
     # this the observe pose's 30-50 deg flex was inherited (approach planner
     # locks flex at its current value) and the fixed jaw tipped pieces over on
     # close. Files a-f reach <3 deg; g/h get the least-tilted pose available.
-    vert = _vertical_wrist(sim, [plan_xy[0], plan_xy[1], surface + grasp_z])
+    aim_xy = pickup.pinch_aim_xy(sim, m.tid, plan_xy, surface + grasp_z)
+    vert = _vertical_wrist(sim, [aim_xy[0], aim_xy[1], surface + grasp_z])
     if vert is not None:
         result["vertical_flex"] = round(vert["wrist_flex"], 4)
         result["vertical_tilt_deg"] = round(vert["tilt_deg"], 2)
         _pitch_in_place(sim, vert["wrist_flex"])
-    grasp_xy = _seeded_grasp_xy(sim, cfg, plan_xy, geom, surface + grasp_z)
+    grasp_xy = _seeded_grasp_xy(sim, cfg, aim_xy, geom, surface + grasp_z)
     pre = find_pregrasp_pose(sim, cfg, grasp_xy)
     if pre is None:
         result["failure_reason"] = "IK_NO_SOLUTION"
@@ -60,6 +61,7 @@ def plan(m: Move):
         log_state(sim, "fail_pregrasp", extra={"target": result["ee_requested"]})
         return Fail("grasp_plan", result["failure_reason"], "pick")
     m.plan_xy = plan_xy
+    m.aim_xy = aim_xy
     m.grasp_xy = grasp_xy
     m.pre = pre
 
