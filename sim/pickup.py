@@ -1246,6 +1246,13 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         return None
     if hasattr(sim, "believe"):
         surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+        # The wedge lens looks along the fingers. At the pregrasp that aim has
+        # carried it past the square: a sliver of the base is still in the crop,
+        # and taking it as the pose shifts the pinch onto the piece. A frame
+        # that no longer sees the square does not replace one that did.
+        center = square_to_world(square, cfg, z=surface)
+        if tid in sim.known and not wrist_sees_point(sim, center):
+            return None
         seen = observe_piece(obs, cfg, square, grow=1.0)
         height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
         hidden = _own_hand_hides(sim, square_to_world(square, cfg, z=surface))
