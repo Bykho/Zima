@@ -1150,8 +1150,47 @@ def _servo_aim(sim: Sim, ee_xyz, target_xyz) -> bool:
     return wrist_sees_point(sim, target_xyz)
 
 
-def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
-    """Reachable wrist poses that still see target_xyz, safest first."""
+def _servo_other_roll(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Drive the in-range roll that sees the square. Used when the aim has none."""
+    start = sim.qpos()
+    with sim.probe():
+        seen = _settle_other_roll(sim, ee_xyz, target_xyz)
+        goal = sim.qpos()
+        sim.set_qpos(start, hold=True)
+    if not seen:
+        return False
+    _drive_arm(sim, [goal], float(start.get("gripper", 0.0)), 0.35)
+    return wrist_sees_point(sim, target_xyz)
+
+
+def _settle_other_roll(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Hold the hover and roll the wrist, inside its range, until the square is seen.
+
+    The orientation aim walks roll into one stop and then either misses the
+    square or pulls the fingertips off the hover. Leaves qpos on a pose that
+    sees `target_xyz` with the gripper still on `ee_xyz`.
+    """
+    base = sim.qpos()
+    jid = sim._joint["wrist_roll"]
+    lo, hi = (float(v) for v in sim.model.jnt_range[jid])
+    ee = np.asarray(ee_xyz, dtype=float)
+    tgt = np.asarray(target_xyz, dtype=float)
+    # The aim already tried the high stop. Start at the low stop and walk back.
+    for roll in np.linspace(lo + 0.05, hi - 0.05, 17):
+        sim.set_qpos(base, hold=True)
+        sim.set_qpos({**sim.qpos(), "wrist_roll": float(roll)}, hold=True)
+        if not solve_ik(sim, ee, lock_joints=("wrist_roll",)):
+            continue
+        pos, _ = sim.site_pose(EE_SITE)
+        if float(np.linalg.norm(pos - ee)) > 0.012:
+            continue
+        if wrist_sees_point(sim, tgt):
+            return True
+    sim.set_qpos(base, hold=True)
+    return False
+
+
+def _observe_candidates(cfg: dict, target_xyz) -> tuple[np.ndarray, list]:
     p = pickup_cfg(cfg)
     board = cfg["sim"]["board"]
     surface = float(board["surface_z"])
@@ -1164,13 +1203,31 @@ def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
         lower_z=(),
         ring_zs=(surface + observe_z, surface + 0.08),
     )
-    return reachable_approaches(
+    return target, cands
+
+
+def _other_roll_looks(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
+    """Hovers the aim cannot use, that still see the square with roll in range."""
+    target, cands = _observe_candidates(cfg, target_xyz)
+    found: list[list[float]] = []
+    for raw in cands:
+        _reset_ik_seed(sim, cfg)
+        if _settle_other_roll(sim, raw, target):
+            found.append([float(raw[0]), float(raw[1]), float(raw[2])])
+    return found
+
+
+def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
+    """Reachable wrist poses that still see target_xyz, safest first."""
+    target, cands = _observe_candidates(cfg, target_xyz)
+    hits = reachable_approaches(
         sim,
         cands,
         reset=lambda: _reset_ik_seed(sim, cfg),
         upright=True,
         accept=lambda c: aim_camera_at(sim, c, target),
     )
+    return hits
 
 
 def _own_hand_hides(sim: Sim, target_xyz) -> bool:
@@ -1207,7 +1264,17 @@ def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | N
     if hit is not None:
         return hit
     seed_vertical(sim, cfg)
-    return _try(find_observe_poses(sim, cfg, target_xyz), 0.9)
+    hit = _try(find_observe_poses(sim, cfg, target_xyz), 0.9)
+    if hit is not None:
+        return hit
+    # Aimed looks are exhausted. The aim walks wrist_roll into one stop; on the
+    # far squares that stop leaves the hover. The other side of the range still
+    # reaches the same hover and holds the square in the lens.
+    for look in _other_roll_looks(sim, cfg, target_xyz):
+        if _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=0.9):
+            if _servo_other_roll(sim, look, target_xyz) and not _own_hand_hides(sim, target_xyz):
+                return look
+    return None
 
 
 def find_pregrasp_poses(sim: Sim, cfg: dict, grasp_xy) -> list[list[float]]:
