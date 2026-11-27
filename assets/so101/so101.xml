@@ -172,9 +172,9 @@
                 <!-- Part sts3215_03a_v1_5 -->
                 <geom type="mesh" class="visual" pos="0.0077 0.0001 -0.0234" quat="1 -1 0 0" mesh="sts3215_03a_v1"
                   material="sts3215_03a_v1_material"/>
-                <!-- Wrist_Roll_D405_Holder replaces Wrist_Roll_Follower_SO101 (same origin/quat). -->
+                <!-- Stock wrist follower. The printed wedge is on the moving jaw, not this link. -->
                 <geom type="mesh" class="visual" pos="0 -0.000218 0.00095" quat="0 1 0 0"
-                  mesh="Wrist_Roll_D405_Holder" material="wrist_roll_follower_so101_v1_material"/>
+                  mesh="wrist_roll_follower_so101_v1" material="wrist_roll_follower_so101_v1_material"/>
                 <geom type="box" class="collision" pos="0 -0.000218 0.00095" quat="0 1 0 0" size="0.01 0.01 0.018"/>
                 <!-- Part wrist_roll_follower_so101_v1 gripper collision  -->
                 <geom name="fixed_jaw_box1" class="collision_gripper" type="box" size="0.0325 0.015 0.015"
@@ -201,22 +201,6 @@
                   pos="-0.0143 0 -0.053"/>
                 <!-- Frame gripperframe -->
                 <site group="3" name="gripperframe" pos="0.012 -0.000218 -0.098127" quat="1 0 1 0"/>
-                <!-- Intel RealSense D405 on the official SO-ARM Wrist_Roll_D405_Holder.
-                     Printed holder is a Wrist_Roll_Follower replacement (same origin).
-                     D405 42×42×23 mm peripheral sits on the dorsal boom; back face on
-                     the holder, optical axis aimed at the pinch (~36° from gripper -Z).
-                     Optical origin: 3.7 mm behind the front glass (datasheet Z') and
-                     9 mm toward the left imager from the housing centerline. FOV 58°
-                     vertical (D405 HD / color). Collision stays enabled. -->
-                <geom name="d405_mount_box" class="collision_gripper" type="box" size="0.015 0.028 0.0085"
-                  pos="0 -0.058 0"/>
-                <body name="camera_mount" pos="0.0019 -0.0588 -0.0156" quat="-0.018437 -0.057943 -0.302655 0.951158">
-                  <geom name="d405_visual" type="box" class="visual" mass="0.060" size="0.021 0.021 0.0115"
-                    pos="0 0 0.0115" rgba="0.18 0.18 0.2 1"/>
-                  <geom name="d405_box" class="collision_gripper" type="box" size="0.021 0.021 0.0115" pos="0 0 0.0115"/>
-                  <camera name="wrist_cam" mode="fixed" pos="-0.009 0 0" euler="0 0 0"
-                    fovy="58" resolution="1280 720"/>
-                </body>
                 <!-- Link moving_jaw_so101_v1 -->
                 <body name="moving_jaw_so101_v1" pos="0.0202 0.0188 -0.0234" quat="1 1 0 0">
                   <!-- Joint from gripper to moving_jaw_so101_v1 -->
@@ -243,6 +227,25 @@
                     pos="-0.0113 -0.076 0.01875"/>
                   <geom name="moving_jaw_box3" class="collision_gripper" type="box" size="0.001 0.005 0.006"
                     pos="-0.0093 -0.067 0.01875"/>
+                  <!-- D405 on the printed tokamak wedge, on the moving jaw's top deck
+                       (mesh z = +24 mm, the face opposite the servo horn). The wedge
+                       STL's z=0 face sits on that deck, centered on the horn pattern.
+                       The housing back is on the sloped plate; the optical axis is
+                       that plate's normal, 12.9 deg down from the finger direction,
+                       and the screws are at the slot midpoint (STL z = 25.5 mm).
+                       Housing 42x42x23 mm. The camera origin is the front face.
+                       The 9 mm site offset is the previous left-imager offset; the
+                       photos do not show which lens is the colour imager. -->
+                  <body name="camera_mount" pos="0 -0.03526 0.06326" quat="0 0 0.623099 0.782143">
+                    <geom name="d405_visual" type="box" class="visual" mass="0.060" size="0.021 0.021 0.0115"
+                      pos="0 0 0.0115" rgba="0.18 0.18 0.2 1"/>
+                    <geom name="d405_box" class="collision_gripper" type="box" size="0.021 0.021 0.0115" pos="0 0 0.0115"/>
+                    <geom name="d405_mount_box" class="collision_gripper" type="box"
+                      size="0.01282 0.021 0.02436" pos="0 -0.00279 0.03005"
+                      quat="0.553059 -0.440598 0.440598 0.553059"/>
+                    <camera name="wrist_cam" mode="fixed" pos="-0.009 0 0" euler="0 0 0"
+                      fovy="58" resolution="1280 720"/>
+                  </body>
                 </body>
               </body>
             </body>
