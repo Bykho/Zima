@@ -106,4 +106,9 @@ def observe_piece(obs: RgbdObservation, cfg: dict, square: str, grow: float = 1.
         return None
     xy = pts.mean(axis=0)[:2]
     top = float(np.percentile(pts[:, 2], _TOP_PCT)) - surface
-    return {"xy": [float(xy[0]), float(xy[1])], "top_h": top, "n": int(len(pts))}
+    return {
+        "xy": [float(xy[0]), float(xy[1])],
+        "top_h": top,
+        "n": int(len(pts)),
+        "pts": np.asarray(pts, dtype=np.float64).copy(),
+    }
