@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 import carry as plumb
-from clearance import HARD_MARGIN, JAW_BODIES, _ROLL_GRID_RAD, obstacle_bodies, plan_approach, verify_approach
+from clearance import HARD_MARGIN, JAW_BODIES, obstacle_bodies, plan_approach, verify_approach
 from ik import EE_SITE, gripper_tilt_deg, joint_limit_margin, move_ik, move_lin, solve_ik_down
 from mj import ARM_JOINTS, JOINT_NAMES, Sim
 import pickup
@@ -157,69 +157,6 @@ def _physical_descend_path(sim: Sim, target, path_q: list[dict], duration: float
         "saturated": [],
         "path_replay": True,
     }
-
-
-def _arm_torque_holds(sim: Sim) -> bool:
-    """True if every arm actuator can hold this pose without sitting on its force clip.
-
-    Gravity plus contact. A pose whose elbow or wrist is past the servo limit
-    sags as soon as it is asked to stay there, so it is not a usable grasp.
-    """
-    import mujoco
-
-    mujoco.mj_forward(sim.model, sim.data)
-    for name in ARM_JOINTS:
-        aid = sim._act[name]
-        lo, hi = sim.model.actuator_forcerange[aid]
-        limit = float(min(abs(lo), abs(hi)))
-        dof = int(sim.model.jnt_dofadr[sim._joint[name]])
-        tau = float(sim.data.qfrc_bias[dof] + sim.data.qfrc_constraint[dof])
-        if abs(tau) >= limit:
-            return False
-    return True
-
-
-def _roll_that_holds(sim: Sim, piece_xy, z: float, geom, prefer: float):
-    """Wrist roll whose vertical grasp stays inside the actuator limit.
-
-    The roll the look left is tried first, so a pose that already holds is
-    kept. Other rolls are the same absolute grid the approach already uses.
-    None means no roll holds: the caller leaves the case failed and does not
-    descend into the clip.
-    """
-    lo, hi = sim.joint_limits()["wrist_roll"]
-    grid = np.arange(float(lo) + 0.05, float(hi) - 0.05 + 1e-9, _ROLL_GRID_RAD)
-    rolls = [float(prefer)]
-    for roll in sorted((float(r) for r in grid), key=lambda r: abs(r - prefer)):
-        if all(abs(roll - have) > 0.15 for have in rolls):
-            rolls.append(roll)
-    start = sim.qpos()
-    saved_ctrl = np.array(sim.data.ctrl)
-    # On the robot the probe is the belief itself: a qpos write stays until
-    # the next encoder read. Put the pregrasp pose and its servo command back
-    # so the search does not move the arm.
-    posed = getattr(sim, "_posed", None)
-    try:
-        return _search_holding_roll(sim, start, rolls, piece_xy, z, geom)
-    finally:
-        sim.set_qpos(start, hold=False)
-        sim.data.ctrl[:] = saved_ctrl
-        if posed is not None:
-            sim._posed = posed
-
-
-def _search_holding_roll(sim, start, rolls, piece_xy, z, geom):
-    for roll in rolls:
-        sim.set_qpos(start, hold=True)
-        xy = _grasp_xy_for_roll(sim, piece_xy, z, geom, roll)
-        sim.set_qpos(start, hold=True)
-        sim.set_qpos({**sim.qpos(), "wrist_roll": float(roll)}, hold=True)
-        target = [float(xy[0]), float(xy[1]), float(z)]
-        if not solve_ik_down(sim, target, lock_joints=("wrist_roll",)):
-            continue
-        if _arm_torque_holds(sim):
-            return float(roll), [float(xy[0]), float(xy[1])]
-    return None
 
 
 def _roll_in_place(sim: Sim, roll_goal: float, rad_per_s: float = 2.0) -> None:
@@ -527,22 +464,6 @@ def run(m: Move, planner=plan_approach):
         float((plan_xy[0] - actual[0]) * 1000.0),
         float((plan_xy[1] - actual[1]) * 1000.0),
     ]
-    # The look has already recorded the piece. Keep its roll when that grasp
-    # holds. If the pose would sit on the actuator clip, take another roll
-    # that holds. No roll that holds means stop here, still above the piece.
-    prefer_roll = float(sim.qpos()["wrist_roll"])
-    held = _roll_that_holds(sim, plan_xy, surface + grasp_z, geom, prefer_roll)
-    if held is None:
-        result["failure_reason"] = "IK_NO_SOLUTION"
-        log_state(sim, "fail_descend", extra={"target": _xyz([plan_xy[0], plan_xy[1], surface + grasp_z]), "hold": False})
-        return Fail("approach", result["failure_reason"], "pick")
-    hold_roll, hold_xy = held
-    if abs(hold_roll - prefer_roll) > 0.05:
-        _roll_in_place(sim, hold_roll)
-        grasp_xy = hold_xy
-        grasp_lock = tuple(dict.fromkeys((*grasp_lock, "wrist_roll")))
-        descend_path = None
-        result["grasp_roll"] = round(hold_roll, 3)
     grasp = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
     result["ee_requested"] = _xyz(grasp)
     column = _descend_column(sim, grasp, grasp_lock)
