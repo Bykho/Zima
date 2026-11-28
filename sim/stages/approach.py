@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 import carry as plumb
-from clearance import HARD_MARGIN, JAW_BODIES, obstacle_bodies, plan_approach, verify_approach
+from clearance import HARD_MARGIN, JAW_BODIES, _ROLL_GRID_RAD, obstacle_bodies, plan_approach, verify_approach
 from ik import EE_SITE, gripper_tilt_deg, joint_limit_margin, move_ik, move_lin, solve_ik_down
 from mj import ARM_JOINTS, JOINT_NAMES, Sim
 import pickup
@@ -157,6 +157,117 @@ def _physical_descend_path(sim: Sim, target, path_q: list[dict], duration: float
         "saturated": [],
         "path_replay": True,
     }
+
+
+# A servo at its force limit that has left the pose. The far-file look holds
+# with the shoulder there, so the shoulder is not a reason to change rolls.
+# The a-file elbow and wrist flex leave the pose; that grasp does not hold.
+_CLIP_SAG_RAD = 0.01
+_CLIP_HOLD_STEPS = 80
+_CLIP_JOINTS = ("elbow_flex", "wrist_flex")
+
+
+def _roll_choices(sim: Sim, prefer: float) -> list[float]:
+    lo, hi = sim.joint_limits()["wrist_roll"]
+    grid = np.arange(float(lo) + 0.05, float(hi) - 0.05 + 1e-9, _ROLL_GRID_RAD)
+    rolls = [float(prefer)]
+    for roll in sorted((float(r) for r in grid), key=lambda r: abs(r - prefer)):
+        if all(abs(roll - have) > 0.15 for have in rolls):
+            rolls.append(roll)
+    return rolls
+
+
+def _scratch_grasp(sim: Sim, roll: float, piece_xy, z: float, shift: float):
+    """IK the grasp at `roll` on a private copy. 'hold', 'clip', or 'miss'.
+
+    The live arm is not written. A pose is on the clip only when elbow_flex
+    or wrist_flex is at its force limit and has sagged off the solution.
+    """
+    import mujoco
+
+    model = sim.model
+    scratch = mujoco.MjData(model)
+    mujoco.mj_copyData(scratch, model, sim.data)
+    live = sim.data
+    sim.data = scratch
+    try:
+        jid = sim._joint["wrist_roll"]
+        lo, hi = model.jnt_range[jid]
+        scratch.qpos[int(model.jnt_qposadr[jid])] = float(np.clip(roll, lo, hi))
+        mujoco.mj_kinematics(model, scratch)
+        seed = [float(piece_xy[0]), float(piece_xy[1]), float(z)]
+        if not solve_ik_down(sim, seed, lock_joints=("wrist_roll",)):
+            return "miss", None
+        _, rot = sim.site_pose(EE_SITE)
+        xy = [float(piece_xy[0] + rot[0, 2] * shift), float(piece_xy[1] + rot[1, 2] * shift)]
+        if not solve_ik_down(sim, [xy[0], xy[1], float(z)], lock_joints=("wrist_roll",)):
+            return "miss", None
+        goal = {}
+        for name in _CLIP_JOINTS:
+            qadr = int(model.jnt_qposadr[sim._joint[name]])
+            goal[name] = float(scratch.qpos[qadr])
+            scratch.ctrl[sim._act[name]] = scratch.qpos[qadr]
+        for name in ARM_JOINTS:
+            if name in _CLIP_JOINTS:
+                continue
+            qadr = int(model.jnt_qposadr[sim._joint[name]])
+            scratch.ctrl[sim._act[name]] = scratch.qpos[qadr]
+        scratch.qvel[:] = 0.0
+        for _ in range(_CLIP_HOLD_STEPS):
+            mujoco.mj_step(model, scratch)
+        for name in _CLIP_JOINTS:
+            aid = sim._act[name]
+            lo, hi = model.actuator_forcerange[aid]
+            limit = float(min(abs(lo), abs(hi)))
+            if abs(float(scratch.actuator_force[aid])) < limit - 1e-3:
+                continue
+            qadr = int(model.jnt_qposadr[sim._joint[name]])
+            if abs(float(scratch.qpos[qadr]) - goal[name]) > _CLIP_SAG_RAD:
+                return "clip", xy
+        return "hold", xy
+    finally:
+        sim.data = live
+
+
+def _roll_that_holds(sim: Sim, piece_xy, z: float, geom, prefer: float):
+    """Keep `prefer` unless that grasp is on the elbow/wrist clip.
+
+    Returns ('keep', None) when the current roll stays, ('roll', (roll, xy))
+    when another roll holds, or ('none', None) when every roll is on the clip.
+    """
+    import mujoco
+
+    live = sim.data
+    qpos = live.qpos.copy()
+    qvel = live.qvel.copy()
+    ctrl = live.ctrl.copy()
+    posed = getattr(sim, "_posed", None)
+    try:
+        shift = pickup._pinch_shift_m(sim, geom)
+        kind, _xy = _scratch_grasp(sim, prefer, piece_xy, z, shift)
+        if kind != "clip":
+            return "keep", None
+        for roll in _roll_choices(sim, prefer):
+            if abs(roll - prefer) <= 0.15:
+                continue
+            kind, xy = _scratch_grasp(sim, roll, piece_xy, z, shift)
+            if kind == "hold":
+                return "roll", (float(roll), xy)
+        return "none", None
+    finally:
+        if sim.data is not live:
+            sim.data = live
+        if (
+            not np.array_equal(live.qpos, qpos)
+            or not np.array_equal(live.qvel, qvel)
+            or not np.array_equal(live.ctrl, ctrl)
+        ):
+            live.qpos[:] = qpos
+            live.qvel[:] = qvel
+            live.ctrl[:] = ctrl
+            mujoco.mj_forward(sim.model, live)
+        if getattr(sim, "_posed", None) != posed:
+            sim._posed = posed
 
 
 def _roll_in_place(sim: Sim, roll_goal: float, rad_per_s: float = 2.0) -> None:
@@ -464,6 +575,23 @@ def run(m: Move, planner=plan_approach):
         float((plan_xy[0] - actual[0]) * 1000.0),
         float((plan_xy[1] - actual[1]) * 1000.0),
     ]
+    prefer_roll = approach.get("roll")
+    if prefer_roll is not None:
+        decision, found = _roll_that_holds(
+            sim, plan_xy, surface + grasp_z, geom, float(prefer_roll)
+        )
+        if decision == "none":
+            result["failure_reason"] = "IK_NO_SOLUTION"
+            log_state(sim, "fail_pregrasp", extra={"target": _xyz(pre), "clip": True})
+            return Fail("approach", result["failure_reason"], "pick")
+        if decision == "roll":
+            roll, xy = found
+            _roll_in_place(sim, roll)
+            grasp_xy = list(xy)
+            if "wrist_roll" not in grasp_lock:
+                grasp_lock = tuple(dict.fromkeys((*grasp_lock, "wrist_roll")))
+            descend_path = None
+            result["grasp_roll"] = float(roll)
     grasp = [grasp_xy[0], grasp_xy[1], surface + grasp_z]
     result["ee_requested"] = _xyz(grasp)
     column = _descend_column(sim, grasp, grasp_lock)
