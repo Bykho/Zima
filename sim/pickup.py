@@ -836,8 +836,21 @@ def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface:
     """Pick again from the current pose after a miss/drop, if the piece is still up."""
     attempt = int(sc.get("_grasp_attempt", 0))
     budget = int(pickup_cfg(cfg).get("grasp_retries", 1))
+    reason = failed.get("failure_reason")
+    # The ordinary retry repeats the pinch. It is what a near miss already
+    # recovers with, so it stays. Only after that same axis has missed again
+    # does one more try turn the pads onto the other horizontal axis.
+    turned = False
     if attempt >= budget:
-        return None
+        if (
+            attempt == budget
+            and reason == "GRASP_MISS"
+            and failed.get("grasp_roll_used") is not None
+            and sc.get("_miss_roll") is None
+        ):
+            turned = True
+        else:
+            return None
     here = sc.get("source")
     if _perceiving(sim):
         _backoff_grasp(sim, cfg, tid, release_open)
@@ -859,6 +872,8 @@ def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface:
     nxt["seed_home"] = False
     nxt["reset_board"] = False
     nxt["_grasp_attempt"] = attempt + 1
+    if turned:
+        nxt["_miss_roll"] = float(failed["grasp_roll_used"])
     log = list(failed.get("grasp_retry_log") or [])
     log.append({"attempt": attempt + 1, "reason": failed.get("failure_reason")})
     return Retry(nxt, {"grasp_retry": True, "grasp_attempts": attempt + 2, "first_grasp_reason": failed.get("failure_reason")}, log)
