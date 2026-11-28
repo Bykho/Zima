@@ -12,7 +12,6 @@ from pickup import (
     grasp_acquired,
     locate_queen,
     log_state,
-    remember_piece_cloud,
     object_on_board,
     queen_upright,
     verify_piece,
@@ -81,10 +80,6 @@ def locate(m: Move):
             return Fail("observe", result["failure_reason"], "pick")
         log_state(sim, "002_observe", extra={"target": _xyz(observe)})
         queen_xyz, _ = sim.object_pose(tid)
-        # Cheat never estimates a cloud. One capture here is the piece the jaws
-        # will close on. The vision wall already stored the cloud it estimated from.
-        if not sc.get("_from_nest"):
-            remember_piece_cloud(sim, cfg, source)
     m.queen_xyz = queen_xyz
     m.grasp_z = grasp_z
 

@@ -10,7 +10,6 @@ from pickup import (
     gripper_object_transform,
     log_state,
     queen_tilt_deg,
-    seat_open_pinch,
 )
 from stages import register
 from stages.types import Fail, Move
@@ -20,7 +19,6 @@ def close(m: Move):
     """Close the jaws and check the grasp from gripper load."""
     sim, result, tid, p, closed_g = m.sim, m.result, m.tid, m.p, m.closed_g
     result["grasp_attempted"] = True
-    seat_open_pinch(sim, m.cfg)
     q_pre, _ = sim.object_pose(tid)
     grip_peak = [0.0]
     prev = sim.on_step

@@ -469,108 +469,6 @@ def _pinch_shift_m(sim: Sim, geom: dict | None) -> float:
     return abs(cache) - _PAD_RADIUS_M - stem_r - clear
 
 
-def _keep_pinch_cloud(sim, pts) -> None:
-    """Keep the fuller wrist cloud of the piece. A later sliver must not replace it."""
-    if pts is None or len(pts) < 20:
-        return
-    prev = getattr(sim, "_pinch_cloud", None)
-    if prev is not None and len(prev) >= len(pts):
-        return
-    sim._pinch_cloud = np.asarray(pts, dtype=np.float64)
-
-
-def remember_piece_cloud(sim, cfg: dict, square: str) -> None:
-    """Store the wrist cloud of `square` for the pre-close pinch shift."""
-    seen = observe_piece(capture_wrist(sim), cfg, square, grow=1.25)
-    if seen is not None:
-        _keep_pinch_cloud(sim, seen["pts"])
-
-
-def _pad_corners(sim, name: str) -> np.ndarray:
-    gid = sim.model.geom(name).id
-    center = np.asarray(sim.data.geom_xpos[gid], dtype=np.float64)
-    rot = np.asarray(sim.data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
-    half = np.asarray(sim.model.geom_size[gid], dtype=np.float64)
-    signs = np.array(
-        [[sx, sy, sz] for sx in (-1.0, 1.0) for sy in (-1.0, 1.0) for sz in (-1.0, 1.0)],
-        dtype=np.float64,
-    )
-    return center + (rot @ (signs * half).T).T
-
-
-def seat_open_pinch(sim, cfg: dict) -> None:
-    """Slide the open hand across the pinch until the piece cloud clears both sides.
-
-    The cloud is the last wrist view of the piece, at the height of the pads.
-    When that cloud misses a pad, the stem is beside the jaw: the close meets
-    the crown and tips the piece, or the jaws close on empty air. Shift along
-    the jaw until the pad center sits inside the cloud. A pad already on the
-    cloud is left where the grasp put it — sliding it at this height knocks
-    the piece — and the opening is left alone, so the moving jaw still does
-    the closing.
-    """
-    pts = getattr(sim, "_pinch_cloud", None)
-    if pts is None or len(pts) < 20:
-        return
-    fixed = _pad_corners(sim, "fixed_jaw_box4")
-    moving = _pad_corners(sim, "moving_jaw_box2")
-    u = moving.mean(axis=0) - fixed.mean(axis=0)
-    gap = float(np.linalg.norm(u))
-    if gap < 1e-6:
-        return
-    u /= gap
-    horiz = np.array([u[0], u[1], 0.0])
-    hn = float(np.linalg.norm(horiz))
-    if hn < 1e-6:
-        return
-    horiz /= hn
-    v = np.array([-horiz[1], horiz[0], 0.0])
-    z0 = float(min(fixed[:, 2].min(), moving[:, 2].min()))
-    z1 = float(max(fixed[:, 2].max(), moving[:, 2].max()))
-    band = pts[(pts[:, 2] >= z0 - _PINCH_CLEAR_MIN_M) & (pts[:, 2] <= z1 + _PINCH_CLEAR_MIN_M)]
-    if len(band) < 20:
-        return
-    board = cfg.get("sim", {}).get("board", {})
-    cap = 0.5 * float(board.get("square_size", 0.040375))
-    need = _PINCH_CLEAR_MIN_M
-    sv = band @ v
-    lo, hi = float(sv.min()), float(sv.max())
-    pad_c = float((fixed @ v).mean())
-    half_w = 0.5 * float(np.ptp(fixed @ v))
-    overlap = min(hi, pad_c + half_w) - max(lo, pad_c - half_w)
-    # A jaw already overlapping the cloud is on the piece. Sliding it
-    # sideways at grasp height knocks the piece. Only a cloud that misses
-    # the pad entirely is sitting against one side with air between.
-    # Do not slide along the opening: that bias is what lets the moving jaw
-    # close onto the fixed pad without shoving half the aperture.
-    if overlap > 0.0:
-        dv = 0.0
-    else:
-        inner_lo, inner_hi = lo + need, hi - need
-        if inner_hi < inner_lo:
-            dv = 0.5 * (lo + hi) - pad_c
-        elif pad_c < inner_lo:
-            dv = inner_lo - pad_c
-        elif pad_c > inner_hi:
-            dv = inner_hi - pad_c
-        else:
-            dv = 0.0
-    dv = float(np.clip(dv, -cap, cap))
-    if abs(dv) < 5e-4:
-        return
-    ee, _ = sim.site_pose(EE_SITE)
-    goal = np.asarray(ee, dtype=np.float64) + v * dv
-    move_lin(
-        sim,
-        goal,
-        duration=0.35,
-        physics=True,
-        n_wp=3,
-        lock_joints=("wrist_roll",),
-        down=True,
-    )
-
-
 @probing
 def _grasp_xy_for_roll(sim: Sim, piece_xy, z: float, geom: dict | None, roll: float | None) -> list[float]:
     """Grasp EE XY for a vertical pinch at the given wrist roll (None = current).
@@ -1444,8 +1342,6 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         if tid in sim.known and not wrist_sees_point(sim, center):
             return None
         seen = observe_piece(obs, cfg, square, grow=1.0)
-        if seen is not None:
-            _keep_pinch_cloud(sim, seen["pts"])
         height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
         hidden = _own_hand_hides(sim, square_to_world(square, cfg, z=surface))
         # A later frame may replace an upright belief with a fallen one only
