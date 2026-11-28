@@ -1,9 +1,11 @@
 """Pickup approach clearance from occupancy + gripper envelope.
 
-No square-name special cases, no motion planner. Camera/perception unused.
+No square-name special cases, no motion planner. Grasp EE XY stays frozen.
 When occupied neighbors sit along the open-jaw axis, the approach aperture
 is the smallest change that keeps those fingers out of neighbor columns.
-Grasp EE XY, close target, and empty-board opening stay frozen.
+Belief occupancy misses pieces the real wall never placed in the scene, so
+the same aperture choice also treats wrist-depth points that are not the
+target as obstacles. An empty board, with no such points, keeps the open jaw.
 """
 
 from __future__ import annotations
@@ -857,6 +859,269 @@ def _candidate_clear(
     return last, used_lock
 
 
+_DEPTH_NEAR_M = 0.09
+# Fine enough that the kept point is still the jaw's nearest approach. A coarser
+# cell drops that point and a sweep that shoves the neighbor looks clear.
+_DEPTH_VOXEL_M = 0.001
+# Body clearance uses the mesh. These points are the visible surface, which sits
+# inside that mesh, and the actuators sag off the IK pose. The sweep has to keep
+# the same approach margin the body check uses.
+_DEPTH_POINT_MARGIN = _APPROACH_MARGIN
+
+
+def _geom_points_gap(sim, gid: int, pts: np.ndarray) -> float:
+    """Signed distance from one collision geom to a world point cloud."""
+    import mujoco
+
+    G = mujoco.mjtGeom
+    pos = np.asarray(sim.data.geom_xpos[gid], dtype=float)
+    R = np.asarray(sim.data.geom_xmat[gid], dtype=float).reshape(3, 3)
+    t = int(sim.model.geom_type[gid])
+    size = np.asarray(sim.model.geom_size[gid], dtype=float)
+    if t == int(G.mjGEOM_SPHERE):
+        return float(np.linalg.norm(pts - pos, axis=1).min() - float(size[0]))
+    if t == int(G.mjGEOM_BOX):
+        q = np.abs((pts - pos) @ R) - size
+        outside = np.linalg.norm(np.maximum(q, 0.0), axis=1)
+        inside = np.max(q, axis=1)
+        dist = np.where(np.all(q <= 0.0, axis=1), inside, outside)
+        return float(dist.min())
+    if t == int(G.mjGEOM_CAPSULE):
+        axis = R[:, 2]
+        along = np.clip((pts - pos) @ axis, -float(size[1]), float(size[1]))
+        closest = pos + along[:, None] * axis
+        return float(np.linalg.norm(pts - closest, axis=1).min() - float(size[0]))
+    if t == int(G.mjGEOM_CYLINDER):
+        axis = R[:, 2]
+        rel = pts - pos
+        along = rel @ axis
+        radial = rel - along[:, None] * axis
+        rad = np.linalg.norm(radial, axis=1)
+        # Outside the finite cylinder: axial overshoot and radial overshoot.
+        ax = np.abs(along) - float(size[1])
+        rd = rad - float(size[0])
+        outside = np.linalg.norm(np.stack([np.maximum(ax, 0.0), np.maximum(rd, 0.0)], axis=1), axis=1)
+        contained = (ax <= 0.0) & (rd <= 0.0)
+        dist = np.where(contained, np.maximum(ax, rd), outside)
+        return float(dist.min())
+    hull = _geom_hull_points(sim, gid)
+    if hull is None or len(hull) == 0:
+        return 1.0
+    if len(hull) > 60:
+        hull = hull[:: max(1, len(hull) // 60)]
+    return float(np.linalg.norm(hull[:, None, :] - pts[None, :, :], axis=2).min())
+
+
+def _jaw_points_gap(sim, pts: np.ndarray, bodies: tuple[str, ...] = JAW_ONLY_BODIES) -> float:
+    """Min gap from the jaw collision geoms to `pts` (1 m when there are none)."""
+    if len(pts) == 0:
+        return 1.0
+    best = 1.0
+    for body in bodies:
+        for gid in _collision_geoms(sim, body):
+            best = min(best, _geom_points_gap(sim, gid, pts))
+            if best < _HARD_MARGIN:
+                return float(best)
+    return float(best)
+
+
+def _voxel_points(pts: np.ndarray, voxel: float) -> np.ndarray:
+    if len(pts) == 0:
+        return pts
+    key = np.round(pts / voxel).astype(np.int32)
+    _, idx = np.unique(key, axis=0, return_index=True)
+    return pts[idx]
+
+
+def _depth_jaw_points(sim, grasp_xy, cfg: dict | None, source: str | None) -> tuple[np.ndarray, np.ndarray]:
+    """Wrist-depth points near the grasp, split into (other squares, target square).
+
+    The real wall hides pieces the belief never saw, so body occupancy is empty
+    while the camera still sees the neighbor the open jaw will sweep through.
+    Points on the target square are the piece being grasped, not obstacles.
+    """
+    from rgbd import unproject
+    from sensor import capture
+    from squares import square_to_world
+
+    empty = np.zeros((0, 3), dtype=float)
+    if not cfg:
+        return empty, empty
+    world = getattr(sim, "_world", None) or sim
+    pts = unproject(capture(world))
+    if len(pts) == 0:
+        return empty, empty
+    board = cfg.get("sim", {}).get("board", {})
+    surface = float(board.get("surface_z", 0.0))
+    size = float(board.get("square_size", 0.0375))
+    above = pts[(pts[:, 2] > surface + 0.006) & (pts[:, 2] < surface + 0.08)]
+    if len(above) == 0:
+        return empty, empty
+    files, ranks = "abcdefgh", "12345678"
+    names = [f + r for r in ranks for f in files]
+    centers = np.array([square_to_world(s, cfg)[:2] for s in names], dtype=float)
+    dist = np.linalg.norm(above[:, None, :2] - centers[None, :, :], axis=2)
+    nearest = np.argmin(dist, axis=1)
+    on_square = dist[np.arange(len(above)), nearest] < size * 0.55
+    grasp_xy = np.asarray(grasp_xy, dtype=float)[:2]
+    if source in names:
+        src_i = names.index(source)
+    else:
+        src_i = int(np.argmin(np.linalg.norm(centers - grasp_xy, axis=1)))
+    reach = np.linalg.norm(above[:, :2] - grasp_xy, axis=1) < _DEPTH_NEAR_M
+    raw_obs = above[reach & on_square & (nearest != src_i)]
+    target = above[on_square & (nearest == src_i)]
+    # A wide piece crosses the square boundary. Those points touch the target
+    # cloud; a real neighbor has a gap. Absorb the connected spill so the jaw
+    # does not dodge the piece it is about to grasp.
+    # One step past the target cloud, not a flood through the next piece.
+    # Two 4 mm steps reach a nose that crossed the square line and stop short
+    # of the gap to a neighbor.
+    obstacles = _without_connected(raw_obs, target, radius=0.004, rounds=2)
+    # The piece itself, including one that perception has shifted inside its
+    # own square, sits inside half a square of the grasp. A neighbor's surface
+    # is past that.
+    if len(obstacles):
+        own = np.linalg.norm(obstacles[:, :2] - grasp_xy, axis=1) < 0.45 * size
+        obstacles = obstacles[~own]
+    return _voxel_points(obstacles, _DEPTH_VOXEL_M), _voxel_points(target, _DEPTH_VOXEL_M)
+
+
+def _without_connected(others: np.ndarray, target: np.ndarray, radius: float, rounds: int) -> np.ndarray:
+    """Drop `others` points that touch the target cloud within `rounds` of `radius`."""
+    if len(others) == 0 or len(target) == 0:
+        return others
+    keep = np.ones(len(others), dtype=bool)
+    pool = target
+    for _ in range(rounds):
+        idx = np.flatnonzero(keep)
+        if len(idx) == 0 or len(pool) == 0:
+            break
+        dist = np.linalg.norm(others[idx, None, :] - pool[None, :, :], axis=2).min(axis=1)
+        absorbed = idx[dist < radius]
+        if len(absorbed) == 0:
+            break
+        keep[absorbed] = False
+        pool = np.concatenate([pool, others[absorbed]])
+    return others[keep]
+
+
+def _descend_poses(sim, pre, grasp, roll: float) -> list[dict] | None:
+    """IK waypoints from pregrasp to grasp at a locked roll. Gripper is irrelevant."""
+    q = sim.qpos()
+    q["wrist_roll"] = float(roll)
+    sim.set_qpos(q, hold=True)
+    pre = np.asarray(pre, dtype=float)
+    grasp = np.asarray(grasp, dtype=float)
+    poses: list[dict] = []
+    for u in (0.0, *_DESCEND_U):
+        xyz = pre + (grasp - pre) * float(u)
+        if not solve_ik_down(sim, xyz, lock_joints=("wrist_roll",)):
+            return None
+        poses.append(sim.qpos())
+    return poses
+
+
+def _aperture_clears_points(
+    sim,
+    poses: list[dict],
+    gripper: float,
+    obstacles: np.ndarray,
+    target: np.ndarray,
+    margin: float,
+) -> bool:
+    """True when the actuated jaw sweep at this opening stays `margin` off the points.
+
+    The arm waypoints are fixed (the roll already holds). Only the jaw joint
+    changes. IK samples miss the sag, so the descend is the smoothstep the
+    real descend commands, stepped on a private MjData, and the close is the
+    moving jaw traveling from this opening to the stop. A jaw that lands
+    inside the target cloud is a hit on the piece itself.
+    """
+    import mujoco
+
+    for pose in poses:
+        q = dict(pose)
+        q["gripper"] = float(gripper)
+        sim.set_qpos(q, hold=True)
+        if len(target) and _jaw_points_gap(sim, target) < _TARGET_MARGIN:
+            return False
+    model = sim.model
+    scratch = mujoco.MjData(model)
+    mujoco.mj_copyData(scratch, model, sim.data)
+    live = sim.data
+    sim.data = scratch
+    try:
+        a, b = poses[0], poses[-1]
+        q = dict(a)
+        q["gripper"] = float(gripper)
+        sim.set_qpos(q, hold=True)
+        scratch.qvel[:] = 0.0
+        n = 24
+        for i in range(n):
+            u = (i + 1) / n
+            u = u * u * (3.0 - 2.0 * u)
+            cmd = {k: float(a[k]) + (float(b[k]) - float(a[k])) * u for k in a}
+            cmd["gripper"] = float(gripper)
+            for name, val in cmd.items():
+                scratch.ctrl[sim._act[name]] = float(val)
+            mujoco.mj_step(model, scratch)
+            if _jaw_points_gap(sim, obstacles) < margin:
+                return False
+        lo = float(sim.joint_limits()["gripper"][0])
+        g = float(gripper)
+        while True:
+            scratch.ctrl[sim._act["gripper"]] = g
+            for _ in range(6):
+                mujoco.mj_step(model, scratch)
+            if _jaw_points_gap(sim, obstacles, ("moving_jaw_so101_v1",)) < margin:
+                return False
+            if g <= lo + 1e-9:
+                break
+            g = max(lo, g - _CLOSE_SWEEP_STEP)
+        return True
+    finally:
+        sim.data = live
+
+
+def _narrow_aperture_for_points(
+    sim,
+    pre,
+    grasp,
+    roll: float,
+    open_g: float,
+    obstacles: np.ndarray,
+    target: np.ndarray,
+    margin: float,
+) -> float | None:
+    """Widest aperture narrower than `open_g` whose jaw sweep clears `obstacles`.
+
+    None when the open jaw already clears, or when every aperture still sweeps
+    through the points. The caller keeps the roll and the opening it had.
+    """
+    start = sim.qpos()
+    try:
+        poses = _descend_poses(sim, pre, grasp, roll)
+        if not poses:
+            return None
+        raw = (float(open_g), *_APERTURE_LADDER, _MIN_APPROACH_G)
+        candidates: list[float] = []
+        for g in raw:
+            g = min(float(g), float(open_g))
+            if g < -1e-9 or any(abs(g - x) <= 0.02 for x in candidates):
+                continue
+            candidates.append(g)
+        for g in candidates:
+            if not _aperture_clears_points(sim, poses, g, obstacles, target, margin):
+                continue
+            if abs(g - float(open_g)) <= 0.02:
+                return None
+            return g
+        return None
+    finally:
+        sim.set_qpos(start, hold=True)
+
+
 @probing
 def plan_approach(
     sim,
@@ -878,8 +1143,9 @@ def plan_approach(
 
     Candidates: unconstrained then wrist-roll × aperture, then the same at a
     few pregrasp XY offsets away from occupied neighbors. Grasp XY is frozen.
-    A candidate must also clear locked-wrist +Z extract. Empty occupancy
-    returns the current default (unlocked roll, open gripper).
+    A candidate must also clear locked-wrist +Z extract. Empty occupancy keeps
+    the current roll and the open jaw, unless wrist-depth points that are not
+    the target lie on the jaw's sweep, in which case the aperture narrows.
     """
     start = sim.qpos()
     pre0 = np.asarray(pre, dtype=float)
@@ -981,10 +1247,29 @@ def plan_approach(
         restore()
         grasp0 = grasp if grasp_for_roll is None else np.asarray(grasp_for_roll(base_roll), dtype=float)
         restore()
+        # No believed bodies. Depth points on other squares are the same kind of
+        # obstacle: keep this roll (it already holds) and narrow the jaw until
+        # the descend and the close sweep stay clear of them.
+        gripper = float(open_g)
+        obstacles, target_pts = _depth_jaw_points(sim, grasp0[:2], cfg, source)
+        if len(obstacles):
+            narrower = _narrow_aperture_for_points(
+                sim,
+                pre_at(0.0, 0.0),
+                grasp0,
+                base_roll,
+                gripper,
+                obstacles,
+                target_pts,
+                max(approach_margin_m(cfg), _DEPTH_POINT_MARGIN),
+            )
+            restore()
+            if narrower is not None:
+                gripper = float(narrower)
         return {
             "ok": True,
             "roll": float(base_roll),
-            "gripper": float(open_g),
+            "gripper": gripper,
             "lock_joints": ("wrist_roll",),
             "n_wp": 1,
             "tried": 1,

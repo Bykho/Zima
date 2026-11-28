@@ -296,6 +296,86 @@ def solve_ik_down(
     return True
 
 
+def solve_ik_aim(
+    sim: Sim,
+    target_pos,
+    local_axis,
+    world_axis,
+    lock_joints: tuple[str, ...] = (),
+    max_iters: int = 80,
+    pos_tol: float = 0.004,
+    tilt_tol_deg: float = 10.0,
+    damping: float = 1e-3,
+    step: float = 0.55,
+    ori_weight: float = 0.45,
+) -> bool:
+    """Reach `target_pos` and align a gripperframe axis with a world direction.
+
+    Same task as solve_ik_down's aimed form, without the flex-lock fallback:
+    if the point and the aim cannot both be met, this returns False. The wrist
+    look uses it so the wedge camera, which looks along the fingers, points at
+    the square. Carry does not.
+    """
+    import mujoco
+
+    model, data = sim.model, sim.data
+    target = np.asarray(target_pos, dtype=np.float64)
+    local = np.asarray(local_axis, dtype=np.float64)
+    local = local / (np.linalg.norm(local) + 1e-12)
+    axis = np.asarray(world_axis, dtype=np.float64)
+    axis = axis / (np.linalg.norm(axis) + 1e-12)
+    sid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, EE_SITE)
+    names = [n for n in ARM_JOINTS if n not in lock_joints]
+    jids = [sim._joint[n] for n in names]
+    dof_ids = np.array([int(model.jnt_dofadr[j]) for j in jids], dtype=int)
+    qadr = np.array([int(model.jnt_qposadr[j]) for j in jids], dtype=int)
+    lo = model.jnt_range[jids, 0]
+    hi = model.jnt_range[jids, 1]
+    jacp = np.zeros((3, model.nv))
+    jacr = np.zeros((3, model.nv))
+    w = float(ori_weight)
+    tilt_tol = np.sin(np.radians(tilt_tol_deg))
+    mujoco.mj_kinematics(model, data)
+    mujoco.mj_comPos(model, data)
+    best = float("inf")
+    since_best = 0
+    for _ in range(max_iters):
+        R = data.site_xmat[sid].reshape(3, 3)
+        x = R @ local
+        e_pos = target - data.site_xpos[sid]
+        e_ori = -np.cross(x, axis)
+        pos_err = float(np.linalg.norm(e_pos))
+        tilt = float(np.linalg.norm(e_ori))
+        if pos_err < pos_tol and tilt < tilt_tol:
+            break
+        score = pos_err + w * tilt
+        if score < best - _STALL_EPS:
+            best = score
+            since_best = 0
+        else:
+            since_best += 1
+            if since_best >= _STALL_ITERS:
+                break
+        mujoco.mj_jacSite(model, data, jacp, jacr, sid)
+        Jp = jacp[:, dof_ids]
+        Jx = -np.cross(np.broadcast_to(x, (len(dof_ids), 3)), jacr[:, dof_ids].T).T
+        Jo = -np.cross(np.broadcast_to(axis, (len(dof_ids), 3)), Jx.T).T
+        J = np.vstack([Jp, w * Jo])
+        e = np.concatenate([e_pos, w * e_ori])
+        dq = J.T @ np.linalg.solve(J @ J.T + damping * np.eye(J.shape[0]), e)
+        data.qpos[qadr] = np.clip(data.qpos[qadr] + step * dq, lo, hi)
+        mujoco.mj_kinematics(model, data)
+        mujoco.mj_comPos(model, data)
+    mujoco.mj_forward(model, data)
+    R = data.site_xmat[sid].reshape(3, 3)
+    pos_err = float(np.linalg.norm(target - data.site_xpos[sid]))
+    tilt = float(np.linalg.norm(np.cross(R @ local, axis)))
+    if pos_err >= pos_tol or tilt >= tilt_tol:
+        return False
+    sim.hold({n: sim.qpos()[n] for n in ARM_JOINTS})
+    return True
+
+
 def solve_ik_upright(sim: Sim, target_pos, lock_joints: tuple[str, ...] = (), **kwargs) -> bool:
     """Reach the point while keeping gripper +X world-down when that is possible."""
     lock = tuple(lock_joints)

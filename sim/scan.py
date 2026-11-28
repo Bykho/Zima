@@ -163,17 +163,35 @@ _POSE_CACHE: dict[str, list[dict]] = {}
 POSE_FILE = Path(__file__).resolve().parents[1] / "data" / "scan_poses.json"
 
 
-def _pose_key(cfg: dict) -> str:
+def camera_mount_sig(sim) -> list[float]:
+    """Camera origin and look in the gripper frame. Changes when the mount moves, so scan poses are replanned."""
+    snap = sim.qpos()
+    try:
+        sim.set_qpos({**snap, "gripper": SCAN_GRIPPER}, hold=False)
+        gid = sim.body_id("gripper")
+        R = sim.data.xmat[gid].reshape(3, 3)
+        origin = sim.data.xpos[gid]
+        cid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, DEFAULT_CAMERA)
+        off = R.T @ (sim.data.cam_xpos[cid] - origin)
+        look = R.T @ (-sim.data.cam_xmat[cid].reshape(3, 3)[:, 2])
+        return [round(float(x), 4) for x in (*off, *look)]
+    finally:
+        sim.set_qpos(snap, hold=True)
+
+
+def _pose_key(cfg: dict, mount: list[float] | None = None) -> str:
     b = cfg.get("sim", {}).get("board", {})
     parts = [b.get("origin", []), b.get("square_size"), b.get("yaw", 0.0), b.get("surface_z"),
              cfg.get("sim", {}).get("arm_base_position", []), SCAN_CLEAR_M, VIEW_MIN_M, VIEW_MAX_TILT_DEG, SCAN_SAMPLES,
              SCAN_GRIPPER]
+    if mount is not None:
+        parts.append(mount)
     return json.dumps(parts)
 
 
 def scan_poses(sim, cfg: dict) -> list[dict[str, float]]:
     """Planned scan poses for this board/arm layout; planned once, then read from data/scan_poses.json."""
-    key = _pose_key(cfg)
+    key = _pose_key(cfg, camera_mount_sig(sim))
     if key in _POSE_CACHE:
         return _POSE_CACHE[key]
     disk = json.loads(POSE_FILE.read_text()) if POSE_FILE.exists() else {}

@@ -36,6 +36,7 @@ from ik import (
     move_qpos,
     reachable_approaches,
     solve_ik,
+    solve_ik_aim,
     solve_ik_down,
 )
 from mj import ARM_JOINTS, DEBUG_DIR, Sim, load_config, probing
@@ -835,8 +836,21 @@ def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface:
     """Pick again from the current pose after a miss/drop, if the piece is still up."""
     attempt = int(sc.get("_grasp_attempt", 0))
     budget = int(pickup_cfg(cfg).get("grasp_retries", 1))
+    reason = failed.get("failure_reason")
+    # The ordinary retry repeats the pinch. It is what a near miss already
+    # recovers with, so it stays. Only after that same axis has missed again
+    # does one more try turn the pads onto the other horizontal axis.
+    turned = False
     if attempt >= budget:
-        return None
+        if (
+            attempt == budget
+            and reason == "GRASP_MISS"
+            and failed.get("grasp_roll_used") is not None
+            and sc.get("_miss_roll") is None
+        ):
+            turned = True
+        else:
+            return None
     here = sc.get("source")
     if _perceiving(sim):
         _backoff_grasp(sim, cfg, tid, release_open)
@@ -858,6 +872,8 @@ def _grasp_retry(sim: Sim, cfg: dict, sc: dict, failed: dict, tid: str, surface:
     nxt["seed_home"] = False
     nxt["reset_board"] = False
     nxt["_grasp_attempt"] = attempt + 1
+    if turned:
+        nxt["_miss_roll"] = float(failed["grasp_roll_used"])
     log = list(failed.get("grasp_retry_log") or [])
     log.append({"attempt": attempt + 1, "reason": failed.get("failure_reason")})
     return Retry(nxt, {"grasp_retry": True, "grasp_attempts": attempt + 2, "first_grasp_reason": failed.get("failure_reason")}, log)
@@ -1098,8 +1114,98 @@ def ray_approach_candidates(
     return _unique_xyz(cands)
 
 
-def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
-    """Reachable wrist poses that still see target_xyz, safest first."""
+def _cam_in_site(sim: Sim) -> tuple[np.ndarray, np.ndarray]:
+    """Camera look direction and origin, both in the gripperframe. Fixed for a gripper opening."""
+    sid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_SITE, EE_SITE)
+    cid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_CAMERA, "wrist_cam")
+    mujoco.mj_forward(sim.model, sim.data)
+    Rs = sim.data.site_xmat[sid].reshape(3, 3)
+    look = Rs.T @ (-sim.data.cam_xmat[cid].reshape(3, 3)[:, 2])
+    off = Rs.T @ (sim.data.cam_xpos[cid] - sim.data.site_xpos[sid])
+    return look, off
+
+
+def aim_camera_at(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Point the wrist camera at `target_xyz` with the gripperframe held at `ee_xyz`.
+
+    The wedge camera looks along the fingers, so the aim is that axis, not the
+    old pinch-facing mount. One rule for every square.
+    """
+    look_site, cam_off = _cam_in_site(sim)
+    ee = np.asarray(ee_xyz, dtype=float)
+    tgt = np.asarray(target_xyz, dtype=float)
+    sid = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_SITE, EE_SITE)
+    for _ in range(4):
+        mujoco.mj_forward(sim.model, sim.data)
+        Rs = sim.data.site_xmat[sid].reshape(3, 3)
+        cam = sim.data.site_xpos[sid] + Rs @ cam_off
+        delta = tgt - cam
+        dist = float(np.linalg.norm(delta))
+        if dist < 1e-4:
+            return False
+        solve_ik_aim(sim, ee, look_site, delta / dist)
+        mujoco.mj_forward(sim.model, sim.data)
+        # The lens is wide. A stalled aim still sees the square when the point
+        # sits in the frustum and the fingertips stayed on the hover.
+        if wrist_sees_point(sim, tgt) and float(np.linalg.norm(sim.data.site_xpos[sid] - ee)) < 0.012:
+            return True
+    return False
+
+
+def _servo_aim(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Physically settle the aim found above. The transit locked the wrist."""
+    start = sim.qpos()
+    with sim.probe():
+        seen = aim_camera_at(sim, ee_xyz, target_xyz)
+        goal = sim.qpos()
+        sim.set_qpos(start, hold=True)
+    if not seen:
+        return False
+    _drive_arm(sim, [goal], float(start.get("gripper", 0.0)), 0.35)
+    return wrist_sees_point(sim, target_xyz)
+
+
+def _servo_other_roll(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Drive the in-range roll that sees the square. Used when the aim has none."""
+    start = sim.qpos()
+    with sim.probe():
+        seen = _settle_other_roll(sim, ee_xyz, target_xyz)
+        goal = sim.qpos()
+        sim.set_qpos(start, hold=True)
+    if not seen:
+        return False
+    _drive_arm(sim, [goal], float(start.get("gripper", 0.0)), 0.35)
+    return wrist_sees_point(sim, target_xyz)
+
+
+def _settle_other_roll(sim: Sim, ee_xyz, target_xyz) -> bool:
+    """Hold the hover and roll the wrist, inside its range, until the square is seen.
+
+    The orientation aim walks roll into one stop and then either misses the
+    square or pulls the fingertips off the hover. Leaves qpos on a pose that
+    sees `target_xyz` with the gripper still on `ee_xyz`.
+    """
+    base = sim.qpos()
+    jid = sim._joint["wrist_roll"]
+    lo, hi = (float(v) for v in sim.model.jnt_range[jid])
+    ee = np.asarray(ee_xyz, dtype=float)
+    tgt = np.asarray(target_xyz, dtype=float)
+    # The aim already tried the high stop. Start at the low stop and walk back.
+    for roll in np.linspace(lo + 0.05, hi - 0.05, 17):
+        sim.set_qpos(base, hold=True)
+        sim.set_qpos({**sim.qpos(), "wrist_roll": float(roll)}, hold=True)
+        if not solve_ik(sim, ee, lock_joints=("wrist_roll",)):
+            continue
+        pos, _ = sim.site_pose(EE_SITE)
+        if float(np.linalg.norm(pos - ee)) > 0.012:
+            continue
+        if wrist_sees_point(sim, tgt):
+            return True
+    sim.set_qpos(base, hold=True)
+    return False
+
+
+def _observe_candidates(cfg: dict, target_xyz) -> tuple[np.ndarray, list]:
     p = pickup_cfg(cfg)
     board = cfg["sim"]["board"]
     surface = float(board["surface_z"])
@@ -1112,13 +1218,31 @@ def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
         lower_z=(),
         ring_zs=(surface + observe_z, surface + 0.08),
     )
-    return reachable_approaches(
+    return target, cands
+
+
+def _other_roll_looks(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
+    """Hovers the aim cannot use, that still see the square with roll in range."""
+    target, cands = _observe_candidates(cfg, target_xyz)
+    found: list[list[float]] = []
+    for raw in cands:
+        _reset_ik_seed(sim, cfg)
+        if _settle_other_roll(sim, raw, target):
+            found.append([float(raw[0]), float(raw[1]), float(raw[2])])
+    return found
+
+
+def find_observe_poses(sim: Sim, cfg: dict, target_xyz) -> list[list[float]]:
+    """Reachable wrist poses that still see target_xyz, safest first."""
+    target, cands = _observe_candidates(cfg, target_xyz)
+    hits = reachable_approaches(
         sim,
         cands,
         reset=lambda: _reset_ik_seed(sim, cfg),
         upright=True,
-        accept=lambda _c: wrist_sees_point(sim, target),
+        accept=lambda c: aim_camera_at(sim, c, target),
     )
+    return hits
 
 
 def _own_hand_hides(sim: Sim, target_xyz) -> bool:
@@ -1138,6 +1262,8 @@ def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | N
         hidden = None
         for look in looks:
             if _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=duration):
+                if not _servo_aim(sim, look, target_xyz):
+                    continue
                 if not _own_hand_hides(sim, target_xyz):
                     return look
                 hidden = hidden or look
@@ -1153,7 +1279,17 @@ def _reach_observe(sim: Sim, cfg: dict, target_xyz, tid: str) -> list[float] | N
     if hit is not None:
         return hit
     seed_vertical(sim, cfg)
-    return _try(find_observe_poses(sim, cfg, target_xyz), 0.9)
+    hit = _try(find_observe_poses(sim, cfg, target_xyz), 0.9)
+    if hit is not None:
+        return hit
+    # Aimed looks are exhausted. The aim walks wrist_roll into one stop; on the
+    # far squares that stop leaves the hover. The other side of the range still
+    # reaches the same hover and holds the square in the lens.
+    for look in _other_roll_looks(sim, cfg, target_xyz):
+        if _safe_lin(sim, look, cfg, lock, obstacles=obstacles, skip={tid}, duration=0.9):
+            if _servo_other_roll(sim, look, target_xyz) and not _own_hand_hides(sim, target_xyz):
+                return look
+    return None
 
 
 def find_pregrasp_poses(sim: Sim, cfg: dict, grasp_xy) -> list[list[float]]:
@@ -1181,6 +1317,27 @@ def find_pregrasp_pose(sim: Sim, cfg: dict, grasp_xy) -> list[float] | None:
     return hits[0] if hits else None
 
 
+def _already_upright(sim, tid: str) -> bool:
+    known = getattr(sim, "known", None)
+    if known is None or tid not in known:
+        return False
+    _, quat = sim.object_pose(tid)
+    return queen_upright(quat)
+
+
+def _short_view_of_standing(sim, cfg: dict, square: str, seen, height: float) -> bool:
+    """The crown is outside the frame, so a low cloud is the view, not a fallen piece.
+
+    A lying body shows a low extent while the standing crown is still in the
+    lens. A column cut off above the base does not.
+    """
+    if seen is None or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height:
+        return False
+    surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+    crown = square_to_world(square, cfg, z=surface + float(height))
+    return not wrist_sees_point(sim, crown)
+
+
 def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray | None:
     """RGB-D estimate from the wrist sensor. Ground truth is logged for evaluation only."""
     tid = _tid(sim)
@@ -1192,10 +1349,25 @@ def locate_queen(sim: Sim, cfg: dict, result: dict, square: str) -> np.ndarray |
         return None
     if hasattr(sim, "believe"):
         surface = float(cfg.get("sim", {}).get("board", {}).get("surface_z", 0.02))
+        # The wedge lens looks along the fingers. At the pregrasp that aim has
+        # carried it past the square: a sliver of the base is still in the crop,
+        # and taking it as the pose shifts the pinch onto the piece. A frame
+        # that no longer sees the square does not replace one that did.
+        center = square_to_world(square, cfg, z=surface)
+        if tid in sim.known and not wrist_sees_point(sim, center):
+            return None
         seen = observe_piece(obs, cfg, square, grow=1.0)
         height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
         hidden = _own_hand_hides(sim, square_to_world(square, cfg, z=surface))
-        upright = seen is None or hidden or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+        # A later frame may replace an upright belief with a fallen one only
+        # when the cloud is what a lying piece shows. A short view, crown
+        # outside the frame, is not that.
+        upright = (
+            seen is None
+            or hidden
+            or seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+            or (_already_upright(sim, tid) and _short_view_of_standing(sim, cfg, square, seen, height))
+        )
         quat = (1.0, 0.0, 0.0, 0.0) if upright else (0.7071068, 0.7071068, 0.0, 0.0)
         result["observed_top_h_mm"] = None if seen is None else round(seen["top_h"] * 1000, 1)
         result["observe_hidden"] = hidden
@@ -1234,7 +1406,9 @@ def _verify_piece(sim, cfg: dict, tid: str, square: str) -> dict:
         sim.forget(tid)
         return {"looked": True, "seen": False}
     height = float((PIECES.get(body_kind(tid) or tid) or {}).get("height", 0.04))
-    upright = seen["top_h"] > VERIFY_UPRIGHT_FRAC * height
+    upright = seen["top_h"] > VERIFY_UPRIGHT_FRAC * height or (
+        _already_upright(sim, tid) and _short_view_of_standing(sim, cfg, square, seen, height)
+    )
     xy, fitted = seen["xy"], False
     if upright:
         fit = fit_upright_xy(obs, cfg, piece_shape(sim, tid), seen["xy"])
